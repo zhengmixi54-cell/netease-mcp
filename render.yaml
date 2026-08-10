@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: xiaoji
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/server-info
+    envVars:
+      - key: AI_PROXY_URL
+        value: https://cilllllll.2621956601.workers.dev
+      # 以下需要在 Render 面板手动填写（敏感信息）
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false

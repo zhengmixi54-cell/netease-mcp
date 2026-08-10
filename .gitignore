@@ -1,0 +1,7 @@
+node_modules/
+cloudflared.exe
+.env
+gmail-tokens.json
+*.log
+.DS_Store
+Thumbs.db
