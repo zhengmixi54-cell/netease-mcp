@@ -10,10 +10,17 @@ const express = require('express');
 const CryptoJS = require('crypto-js');
 const forge = require('node-forge');
 const path = require('path');
+const multer = require('multer');
 const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ── 文件上传中间件（内存存储，不落盘） ──
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 } // 15MB
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -34,6 +41,68 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index-new.html')))
 // ── 服务信息 ──
 app.get('/api/server-info', (req, res) => {
   res.json({ ok: true, version: '2.2.0', time: new Date().toISOString() });
+});
+
+// ═══════════════════════════════════════
+//  文件上传 → 提取文字
+// ═══════════════════════════════════════
+
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '未收到文件' });
+
+    const { originalname, buffer, mimetype, size } = req.file;
+    const ext = (originalname.split('.').pop() || '').toLowerCase();
+
+    let text = '';
+    let fileType = 'text';
+
+    if (ext === 'pdf' || mimetype === 'application/pdf') {
+      fileType = 'pdf';
+      const { PDFParse } = require('pdf-parse');
+      const parser = new PDFParse({ data: buffer });
+      const pdfData = await parser.getText();
+      text = pdfData.text || '';
+    } else if (ext === 'docx' || mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      fileType = 'docx';
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value || '';
+    } else if (ext === 'doc' || mimetype === 'application/msword') {
+      // .doc 旧格式，mammoth 不支持，尝试用 textract 或提示
+      fileType = 'doc';
+      // 简单提取：去掉二进制噪音，保留可读文本
+      text = buffer.toString('latin1').replace(/[^\x20-\x7E\u4e00-\u9fff\u3000-\u303f\n\r]/g, ' ').replace(/\s{3,}/g, '\n').trim();
+      if (text.length < 20) {
+        return res.json({ ok: false, error: '.doc 旧格式支持有限，建议另存为 .docx 后再上传', text: '', filename: originalname });
+      }
+    } else {
+      // md, txt, json, csv, log, html, xml, yml 等纯文本
+      fileType = ext || 'txt';
+      text = buffer.toString('utf8');
+    }
+
+    // 截断超长文本（最多 50000 字符约 ~25000 汉字）
+    const MAX_CHARS = 50000;
+    let truncated = false;
+    if (text.length > MAX_CHARS) {
+      text = text.slice(0, MAX_CHARS);
+      truncated = true;
+    }
+
+    res.json({
+      ok: true,
+      filename: originalname,
+      fileType,
+      size,
+      text,
+      truncated,
+      charCount: text.length
+    });
+  } catch (e) {
+    console.error('Upload error:', e);
+    res.status(500).json({ error: '文件解析失败: ' + e.message });
+  }
 });
 
 // ═══════════════════════════════════════

@@ -550,7 +550,9 @@
 
   <div class="chat-input-bar">
     <input type="file" id="img-input" accept="image/*" style="display:none" onchange="handleImage(event)"/>
-    <button class="img-thumb-btn" onclick="document.getElementById('img-input').click()">🖼</button>
+    <input type="file" id="file-input" accept=".md,.txt,.pdf,.docx,.doc,.json,.csv,.log,.html,.htm,.xml,.yml,.yaml,.rtf,.py,.js,.ts,.java,.c,.cpp,.go,.rs,.rb,.php,.sh,.bat,.ps1,.sql,.css,.scss" style="display:none" onchange="handleFile(event)"/>
+    <button class="img-thumb-btn" onclick="document.getElementById('img-input').click()" title="图片">🖼</button>
+    <button class="img-thumb-btn" onclick="document.getElementById('file-input').click()" title="上传文件">📎</button>
     <textarea id="chat-textarea" rows="1" placeholder="> 说点什么…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     <button class="send-btn" id="send-btn" onclick="sendMessage()">
       <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
@@ -1066,6 +1068,101 @@ function handleImage(event) {
   };
   reader.readAsDataURL(file);
   event.target.value = '';
+}
+
+/* ── 文件上传：提取文字 → 发给AI ── */
+async function handleFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+
+  // 显示上传中的提示
+  const ts = timestamp();
+  const fileName = file.name;
+  const fileSizeKB = (file.size / 1024).toFixed(1);
+  appendBubble('user', `📎 ${fileName} (${fileSizeKB} KB)`, ts);
+  document.getElementById('chat-empty').style.display = 'none';
+
+  // 插入一个"解析中"的typing
+  const typingId = 'typing-' + Date.now();
+  appendTyping(typingId);
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const resp = await fetch(API_BASE + '/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await resp.json();
+    removeTyping(typingId);
+
+    if (!data.ok) {
+      showToast(data.error || '文件解析失败');
+      return;
+    }
+
+    if (!data.text || !data.text.trim()) {
+      showToast('文件内容为空');
+      return;
+    }
+
+    // 把文件内容作为消息发送给AI
+    const notice = data.truncated
+      ? `\n\n[注：文件较长，已截取前 ${data.charCount} 字符]`
+      : '';
+    const userText = `我上传了一个文件「${fileName}」（${data.fileType} 格式，约 ${fileSizeKB} KB），以下是文件内容：\n\n---\n${data.text}${notice}\n---\n\n请帮我分析/总结/回答关于这个文件的问题。`;
+
+    // 直接调用 sendMessage 的逻辑，但不从 textarea 取值
+    const apiKey = localStorage.getItem('api_key');
+    if (!apiKey) { showToast('未设置 API Key'); switchPage('settings'); return; }
+
+    document.getElementById('send-btn').disabled = true;
+
+    const userTs = timestamp();
+    chatHistory.push({ role: 'user', content: userText, time: userTs });
+
+    const aiTypingId = 'typing-ai-' + Date.now();
+    appendTyping(aiTypingId);
+
+    const mem = localStorage.getItem('memory');
+    const now = new Date();
+    const isoTime = now.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai', year:'numeric', month:'long', day:'numeric',
+      weekday:'long', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false
+    });
+    let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n现在的北京时间是：${isoTime}`;
+    if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
+
+    const aiResp = await fetch(API_BASE + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys,
+        messages: chatHistory.map(m => ({ role: m.role, content: m.content }))
+      })
+    });
+
+    removeTyping(aiTypingId);
+
+    if (!aiResp.ok) {
+      const err = await aiResp.json();
+      throw new Error(err.error?.message || '请求失败');
+    }
+    const aiData = await aiResp.json();
+    const reply = aiData.content[0].text;
+    const replyTs = timestamp();
+    chatHistory.push({ role: 'assistant', content: reply, time: replyTs });
+    appendBubble('assistant', reply, replyTs);
+    saveChatHistory();
+  } catch(e) {
+    removeTyping(typingId);
+    document.querySelectorAll('[id^="typing-ai-"]').forEach(el => el.remove());
+    showToast('错误: ' + e.message);
+  } finally {
+    document.getElementById('send-btn').disabled = false;
+  }
 }
 
 function appendBubble(role, text, time, imgPreview) {

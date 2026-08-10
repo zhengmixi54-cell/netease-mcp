@@ -5,3 +5,8 @@ gmail-tokens.json
 *.log
 .DS_Store
 Thumbs.db
+client_secret*.json
+test-upload.*
+test.json
+server-stdout.log
+server-stderr.log
