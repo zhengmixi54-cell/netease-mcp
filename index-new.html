@@ -535,6 +535,7 @@
       </div>
     </div>
     <div class="header-btns">
+      <button class="px-btn header-btn" onclick="syncChatMenu()" title="云同步">☁</button>
       <button class="px-btn header-btn" onclick="clearChat()">清空</button>
       <button class="px-btn-pink header-btn" onclick="exportChatToDiary()">→ 日记</button>
     </div>
@@ -662,10 +663,18 @@
         <input type="password" id="sb-key-input" placeholder="eyJ..." />
       </div>
     </div>
+    <div class="settings-group">
+      <div class="settings-px-title">// 聊天同步码</div>
+      <div class="settings-card">
+        <label>填一个同步码（不同设备填相同的码即可同步聊天记录）</label>
+        <input type="text" id="sync-code-input" placeholder="比如：my-xiaoji-001" />
+      </div>
+    </div>
     <button class="save-settings-btn" onclick="saveSettings()">[ SAVE ]</button>
     <div class="sql-card">
       <div class="settings-px-title" style="margin-bottom:10px;">// SUPABASE SQL</div>
-      <pre>CREATE TABLE diary (
+      <pre>-- 日记表
+CREATE TABLE diary (
   id bigint generated always as identity primary key,
   created_at timestamptz default now(),
   date text not null,
@@ -675,7 +684,20 @@
 
 alter table diary enable row level security;
 create policy "allow insert" on diary for insert with check (true);
-create policy "allow select" on diary for select using (true);</pre>
+create policy "allow select" on diary for select using (true);
+
+-- 聊天记录同步表
+CREATE TABLE chat_history (
+  id bigint generated always as identity primary key,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  sync_code text unique not null,
+  messages jsonb not null,
+  device_name text
+);
+
+alter table chat_history enable row level security;
+create policy "allow all" on chat_history for all using (true) with check (true);</pre>
     </div>
   </div>
 </div>
@@ -773,11 +795,15 @@ async function checkBackend() {
 }
 
 /* ═══════════════════════════════════════
-   聊天历史
+   聊天历史 + 云同步
    ═══════════════════════════════════════ */
 function loadChatHistory() {
   const saved = localStorage.getItem('chat_history');
-  if (!saved) return;
+  if (!saved) {
+    // 本地没有，尝试从云端拉取
+    tryCloudPullOnStartup();
+    return;
+  }
   try {
     chatHistory = JSON.parse(saved);
     if (!chatHistory.length) return;
@@ -790,19 +816,128 @@ function loadChatHistory() {
 
 function saveChatHistory() {
   localStorage.setItem('chat_history', JSON.stringify(chatHistory.slice(-500)));
+  // 自动云同步（防抖，3秒内只执行一次）
+  if (window._syncTimer) clearTimeout(window._syncTimer);
+  window._syncTimer = setTimeout(() => syncChatToCloud(true), 3000);
 }
 
 function clearChat() {
   if (!confirm('确定清空所有聊天记录吗？')) return;
   chatHistory = [];
   localStorage.removeItem('chat_history');
-  // 修复：重建完整的空状态，保留样式
   document.getElementById('messages-wrap').innerHTML = `
     <div class="chat-empty" id="chat-empty">
       <div class="px-logo">* XIAOJI *<br>v2.0.0</div>
       <p>今天过得怎么样？<br>随便说点什么吧。</p>
     </div>`;
   showToast('已清空');
+}
+
+/* ── 云同步 ── */
+function getSyncConfig() {
+  const syncCode = localStorage.getItem('sync_code');
+  const sbUrl = localStorage.getItem('sb_url');
+  const sbKey = localStorage.getItem('sb_key');
+  return { syncCode, sbUrl, sbKey, ready: !!(syncCode && sbUrl && sbKey) };
+}
+
+function syncChatMenu() {
+  const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
+  if (!ready) {
+    showToast('请先在设置页填写同步码和 Supabase');
+    switchPage('settings');
+    return;
+  }
+  if (confirm('☁ 上传聊天记录到云端？\n\n点击「取消」改为从云端拉取')) {
+    syncChatToCloud(false);
+  } else {
+    pullChatFromCloud();
+  }
+}
+
+async function syncChatToCloud(silent) {
+  const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
+  if (!ready) return;
+  if (!chatHistory.length && !silent) { showToast('没有聊天记录'); return; }
+  try {
+    const deviceName = navigator.userAgent.includes('Mobile') ? '手机' : '电脑';
+    const resp = await fetch(API_BASE + '/api/chat/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        syncCode, messages: chatHistory.slice(-500),
+        deviceName, sbUrl, sbKey
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      if (!silent) showToast(`已上传 ${data.count} 条到云端`);
+      localStorage.setItem('last_sync_time', new Date().toISOString());
+    } else if (!silent) {
+      showToast(data.error || '同步失败');
+    }
+  } catch(e) {
+    if (!silent) showToast('同步失败: ' + e.message);
+  }
+}
+
+async function pullChatFromCloud() {
+  const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
+  if (!ready) {
+    showToast('请先在设置页填写同步码和 Supabase');
+    switchPage('settings');
+    return;
+  }
+  if (chatHistory.length && !confirm('本地已有聊天记录，确定用云端覆盖？')) return;
+  showToast('正在从云端拉取…');
+  try {
+    const resp = await fetch(`${API_BASE}/api/chat/sync?code=${encodeURIComponent(syncCode)}&sbUrl=${encodeURIComponent(sbUrl)}&sbKey=${encodeURIComponent(sbKey)}`);
+    const data = await resp.json();
+    if (data.ok && data.messages) {
+      chatHistory = data.messages;
+      localStorage.setItem('chat_history', JSON.stringify(chatHistory));
+      // 重新渲染
+      document.getElementById('messages-wrap').innerHTML = '';
+      if (chatHistory.length) {
+        document.getElementById('chat-empty').style.display = 'none';
+        chatHistory.forEach(m => appendBubble(m.role, m.content, m.time));
+        const wrap = document.getElementById('messages-wrap');
+        setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
+      } else {
+        document.getElementById('messages-wrap').innerHTML = `
+          <div class="chat-empty" id="chat-empty">
+            <div class="px-logo">* XIAOJI *<br>v2.0.0</div>
+            <p>今天过得怎么样？<br>随便说点什么吧。</p>
+          </div>`;
+      }
+      const time = new Date(data.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+      showToast(`已拉取 ${chatHistory.length} 条（更新于 ${time}）`);
+    } else {
+      showToast(data.message || '云端无数据');
+    }
+  } catch(e) {
+    showToast('拉取失败: ' + e.message);
+  }
+}
+
+async function tryCloudPullOnStartup() {
+  const { ready } = getSyncConfig();
+  if (!ready) return;
+  try {
+    const { syncCode, sbUrl, sbKey } = getSyncConfig();
+    const resp = await fetch(`${API_BASE}/api/chat/sync?code=${encodeURIComponent(syncCode)}&sbUrl=${encodeURIComponent(sbUrl)}&sbKey=${encodeURIComponent(sbKey)}`);
+    const data = await resp.json();
+    if (data.ok && data.messages && data.messages.length) {
+      chatHistory = data.messages;
+      localStorage.setItem('chat_history', JSON.stringify(chatHistory));
+      document.getElementById('chat-empty').style.display = 'none';
+      chatHistory.forEach(m => appendBubble(m.role, m.content, m.time));
+      const wrap = document.getElementById('messages-wrap');
+      setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
+      const time = new Date(data.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+      console.log('从云端恢复了 ' + chatHistory.length + ' 条聊天记录');
+    }
+  } catch(e) { /* 静默失败 */ }
 }
 
 /* ═══════════════════════════════════════
@@ -813,6 +948,7 @@ function saveSettings() {
   localStorage.setItem('sb_url', document.getElementById('sb-url-input').value.trim());
   localStorage.setItem('sb_key', document.getElementById('sb-key-input').value.trim());
   localStorage.setItem('memory', document.getElementById('memory-input').value.trim());
+  localStorage.setItem('sync_code', document.getElementById('sync-code-input').value.trim());
   checkSetup();
   showToast('配置已保存');
 }
@@ -821,6 +957,7 @@ function loadSettings() {
   document.getElementById('sb-url-input').value = localStorage.getItem('sb_url') || '';
   document.getElementById('sb-key-input').value = localStorage.getItem('sb_key') || '';
   document.getElementById('memory-input').value = localStorage.getItem('memory') || '';
+  document.getElementById('sync-code-input').value = localStorage.getItem('sync_code') || '';
 }
 function checkSetup() {
   document.getElementById('setup-banner').style.display =

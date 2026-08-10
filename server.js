@@ -438,6 +438,74 @@ app.post('/api/gmail/draft-and-send', async (req, res) => {
 });
 
 // ═══════════════════════════════════════
+//  聊天记录云同步（通过 Supabase 代理）
+// ═══════════════════════════════════════
+
+// 上传聊天记录到云端
+app.post('/api/chat/sync', async (req, res) => {
+  try {
+    const { syncCode, messages, deviceName, sbUrl, sbKey } = req.body;
+    if (!syncCode) return res.status(400).json({ error: '缺少同步码' });
+    if (!sbUrl || !sbKey) return res.status(400).json({ error: '缺少 Supabase 配置' });
+
+    const resp = await fetch(`${sbUrl}/rest/v1/chat_history`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': sbKey,
+        'Authorization': `Bearer ${sbKey}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        sync_code: syncCode,
+        messages: messages,
+        device_name: deviceName || 'unknown',
+        updated_at: new Date().toISOString()
+      })
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: `Supabase 错误: ${errText.slice(0, 200)}` });
+    }
+    res.json({ ok: true, message: '已同步到云端', count: messages.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 从云端拉取聊天记录
+app.get('/api/chat/sync', async (req, res) => {
+  try {
+    const syncCode = req.query.code;
+    const sbUrl = req.query.sbUrl;
+    const sbKey = req.query.sbKey;
+    if (!syncCode) return res.status(400).json({ error: '缺少同步码' });
+    if (!sbUrl || !sbKey) return res.status(400).json({ error: '缺少 Supabase 配置' });
+
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/chat_history?sync_code=eq.${encodeURIComponent(syncCode)}&select=messages,updated_at,device_name&order=updated_at.desc&limit=1`,
+      {
+        headers: {
+          'apikey': sbKey,
+          'Authorization': `Bearer ${sbKey}`
+        }
+      }
+    );
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: `Supabase 错误: ${errText.slice(0, 200)}` });
+    }
+    const data = await resp.json();
+    if (!data.length) return res.json({ ok: false, message: '云端无数据' });
+    res.json({ ok: true, messages: data[0].messages, updated_at: data[0].updated_at, device_name: data[0].device_name });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════
 //  启动
 // ═══════════════════════════════════════
 app.listen(PORT, '0.0.0.0', () => {
