@@ -311,9 +311,10 @@ app.post('/api/music/play', (req, res) => {
 const GMAIL_CID = process.env.GMAIL_CLIENT_ID;
 const GMAIL_SECRET = process.env.GMAIL_CLIENT_SECRET;
 const GMAIL_REDIRECT = process.env.GMAIL_REDIRECT_URI; // 留空则自动推断
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
 
 // ── 内存存储 Gmail token（云部署文件系统是临时的） ──
-let gmailTokenStore = null;
+let gmailTokenStore = GMAIL_REFRESH_TOKEN ? { refresh_token: GMAIL_REFRESH_TOKEN } : null;
 
 // 根据请求来源动态生成回调URL
 function getRedirectUri(req) {
@@ -471,8 +472,10 @@ app.post('/api/gmail/draft-and-send', async (req, res) => {
   try {
     const gmail = getAuthedGmail(req);
     if (!gmail) return res.status(400).json({ error: 'Gmail 未授权' });
-    const { to, subject, instruction, apiKey, memory } = req.body;
+    const { to, subject, instruction, memory } = req.body;
+    const apiKey = req.headers['x-api-key'] || req.body.apiKey;
     if (!to || !instruction) return res.status(400).json({ error: '缺少收件人或写信意图' });
+    if (!apiKey) return res.status(400).json({ error: '缺少 AI API Key，请先在设置中填写' });
 
     const sys = `你是小机，正在帮用户写一封邮件。根据用户的描述，用得体、自然的中文写邮件正文。直接输出邮件正文HTML，不加标题、不加解释、不要写"收件人"等抬头。语气根据用户描述调整。`;
     const userMsg = `收件人：${to}\n主题：${subject || '(由你拟定)'}\n用户的写信意图：${instruction}${memory ? '\n\n用户信息：' + memory : ''}`;
@@ -484,7 +487,8 @@ app.post('/api/gmail/draft-and-send', async (req, res) => {
     });
     const aiData = await aiResp.json();
     if (!aiResp.ok) return res.status(aiResp.status).json(aiData);
-    const emailBody = aiData.content[0].text;
+    const emailBody = aiData.content?.[0]?.text;
+    if (!emailBody) return res.status(502).json({ error: 'AI 未返回邮件正文' });
     const finalSubject = subject || '来自小机的邮件';
 
     const raw = [

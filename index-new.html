@@ -575,7 +575,7 @@
       <div class="now-playing-label">▶ NOW PLAYING</div>
       <div class="now-playing-name" id="np-name"></div>
       <div class="now-playing-artist" id="np-artist"></div>
-      <iframe id="ne-player" style="width:100%;height:86px;border:0;margin-bottom:10px;border:2px solid var(--b1);background:var(--bg2);" frameborder="0" marginwidth="0" marginheight="0" allow="autoplay"></iframe>
+      <audio id="ne-player" controls preload="none" style="width:100%;margin-bottom:10px;"></audio>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button class="px-btn" style="padding:5px 12px;font-size:11px;" id="np-open-app" onclick="openInApp()">在客户端打开</button>
       </div>
@@ -1376,23 +1376,23 @@ async function playSong(songId, name, artist) {
   document.getElementById('np-artist').textContent = artist;
   document.getElementById('np-lyrics').textContent = '加载歌词中…';
 
-  // 用网易云嵌入播放器（手机电脑都能用，不需要登录）
-  player.src = `https://music.163.com/outchain/player?type=2&id=${songId}&auto=1&height=66`;
-  showToast('正在播放：' + name);
+  // 网易云会阻止第三方 iframe 播放；改用同源音频代理。
+  player.pause();
+  player.src = `${API_BASE}/api/music/stream/${encodeURIComponent(songId)}`;
+  player.load();
+  player.play().catch(() => showToast('请点击播放器的播放键；该歌曲可能受版权或会员限制'));
+  showToast('正在加载：' + name);
   // 加载歌词
   loadLyrics(songId);
 }
 
 function openInApp() {
   if (!currentSongId) return;
-  fetch(API_BASE + '/api/music/play', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ songId: currentSongId })
-  }).then(r => r.json()).then(d => {
-    if (d.ok) showToast('已发送到网易云客户端');
-    else showToast('无法调起客户端（仅桌面端可用）');
-  }).catch(() => showToast('仅桌面端可用'));
+  // 深链必须由当前设备的浏览器发起，云端服务器无法启动访客手机/电脑上的 App。
+  const songPage = `https://music.163.com/song?id=${encodeURIComponent(currentSongId)}`;
+  const fallback = window.setTimeout(() => window.open(songPage, '_blank', 'noopener'), 900);
+  window.addEventListener('pagehide', () => window.clearTimeout(fallback), { once: true });
+  window.location.href = `orpheus://song/${encodeURIComponent(currentSongId)}`;
 }
 
 async function loadLyrics(songId) {

@@ -14,3 +14,7 @@ services:
         sync: false
       - key: GMAIL_CLIENT_SECRET
         sync: false
+      - key: GMAIL_REDIRECT_URI
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
