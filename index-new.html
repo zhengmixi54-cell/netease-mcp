@@ -1015,16 +1015,32 @@ async function sendMessage(imageData) {
     });
     let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n现在的北京时间是：${isoTime}`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
+    const playing = JSON.parse(localStorage.getItem('current_song') || 'null');
+    if (playing) sys += `\n\n用户当前正在听：${playing.name} - ${playing.artist}（网易云歌曲 ID: ${playing.songId}）。当用户问正在播放什么、换歌或暂停时，请结合这个状态回答。`;
 
     const resp = await fetch(API_BASE + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, system: sys, messages: chatHistory.map(m => ({role: m.role, content: m.content})) })
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1000, system: sys,
+        messages: chatHistory.map(m => ({role: m.role, content: m.content})),
+        tools: [
+          { name: 'search_music', description: '搜索网易云音乐。用户要点歌、找歌或问某首歌时先调用。', input_schema: { type: 'object', properties: { query: { type: 'string', description: '歌曲名、歌手或关键词' } }, required: ['query'] } },
+          { name: 'play_music', description: '在用户当前设备的网页播放器播放一首已确定 ID 的网易云歌曲。仅在搜索到歌曲并已决定播放时调用。', input_schema: { type: 'object', properties: { songId: { type: 'integer' }, name: { type: 'string' }, artist: { type: 'string' } }, required: ['songId', 'name', 'artist'] } },
+          { name: 'edit_diary', description: '当用户要求写、修改、整理或保存日记时，主动把完整日记写入日记功能。仅在用户明确要求保存时才将 save 设为 true。', input_schema: { type: 'object', properties: { rawInput: { type: 'string', description: '日记素材或简要记录' }, diaryText: { type: 'string', description: '完整日记正文' }, save: { type: 'boolean', description: '用户明确要求保存时为 true' } }, required: ['diaryText'] } },
+          { name: 'compose_email', description: '当用户要求写、修改或准备邮件时，主动把邮件草稿填入邮件功能。绝不代表用户发送邮件。', input_schema: { type: 'object', properties: { to: { type: 'string', description: '收件人邮箱；未知时留空' }, subject: { type: 'string', description: '邮件主题' }, body: { type: 'string', description: '邮件正文' } }, required: ['body'] } }
+        ]
+      })
     });
     removeTyping(typingId);
     if (!resp.ok) { const err = await resp.json(); throw new Error(err.error?.message || '请求失败'); }
     const data = await resp.json();
-    const reply = data.content[0].text;
+    for (const action of data.clientActions || []) {
+      if (action.type === 'play_music') await playSong(action.songId, action.name, action.artist, true);
+      if (action.type === 'edit_diary') applyDiaryAction(action);
+      if (action.type === 'compose_email') applyEmailAction(action);
+    }
+    const reply = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || '已帮你安排好了。';
     const replyTs = timestamp();
     chatHistory.push({ role: 'assistant', content: reply, time: replyTs });
     appendBubble('assistant', reply, replyTs);
@@ -1035,6 +1051,26 @@ async function sendMessage(imageData) {
   } finally {
     document.getElementById('send-btn').disabled = false;
   }
+}
+
+function applyDiaryAction({ rawInput, diaryText, save }) {
+  document.getElementById('diary-input').value = rawInput || document.getElementById('diary-input').value;
+  currentDiary = diaryText;
+  document.getElementById('diary-result-text').textContent = diaryText;
+  document.getElementById('diary-result-wrap').style.display = 'block';
+  document.getElementById('diary-save-btn').disabled = false;
+  switchPage('diary');
+  if (save) saveDiary(); else showToast('小机已写好日记，确认后点击保存');
+}
+
+function applyEmailAction({ to, subject, body }) {
+  document.getElementById('mail-to').value = to || '';
+  document.getElementById('mail-subject').value = subject || '';
+  const instruction = document.getElementById('mail-instruction');
+  instruction.value = body;
+  instruction.dataset.readyToSend = 'true';
+  switchPage('mail');
+  showToast('小机已填好邮件草稿，请检查后点击发送');
 }
 
 /* ── 图片处理：压缩 + 预览 ── */
@@ -1367,21 +1403,45 @@ async function searchMusic() {
 
 let currentSongId = null;
 
-async function playSong(songId, name, artist) {
+async function playDirectMusicUrl(player, songId) {
+  const response = await fetch(`${API_BASE}/api/music/url/${encodeURIComponent(songId)}`);
+  const data = await response.json();
+  if (!response.ok || !data.ok || !data.url) throw new Error(data.message || '无法获取备用播放地址');
+  player.dataset.directFallback = 'true';
+  player.src = data.url;
+  player.load();
+  await player.play();
+}
+
+async function playSong(songId, name, artist, fromAssistant = false) {
   currentSongId = songId;
   const npWrap = document.getElementById('now-playing-wrap');
   const player = document.getElementById('ne-player');
   npWrap.style.display = 'block';
   document.getElementById('np-name').textContent = name;
   document.getElementById('np-artist').textContent = artist;
+  localStorage.setItem('current_song', JSON.stringify({ songId, name, artist, startedAt: new Date().toISOString() }));
   document.getElementById('np-lyrics').textContent = '加载歌词中…';
 
   // 网易云会阻止第三方 iframe 播放；改用同源音频代理。
   player.pause();
+  delete player.dataset.directFallback;
   player.src = `${API_BASE}/api/music/stream/${encodeURIComponent(songId)}`;
   player.load();
   player.play().catch(() => showToast('请点击播放器的播放键；该歌曲可能受版权或会员限制'));
-  showToast('正在加载：' + name);
+  player.onerror = async () => {
+    if (player.dataset.directFallback === 'true') {
+      showToast('网页播放失败：该歌曲可能受版权、会员或地区限制');
+      return;
+    }
+    try {
+      showToast('正在切换备用播放线路…');
+      await playDirectMusicUrl(player, songId);
+    } catch (error) {
+      showToast('网页播放失败：' + error.message);
+    }
+  };
+  showToast((fromAssistant ? '小机为你点播：' : '正在加载：') + name);
   // 加载歌词
   loadLyrics(songId);
 }
@@ -1486,15 +1546,17 @@ async function sendMail() {
   btnText.innerHTML = '小机写信中<span class="dots"></span>';
   try {
     const mem = localStorage.getItem('memory');
+    const readyToSend = document.getElementById('mail-instruction').dataset.readyToSend === 'true';
     const resp = await fetch(API_BASE + '/api/gmail/draft-and-send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ to, subject, instruction, memory: mem })
+      body: JSON.stringify({ to, subject, instruction, memory: mem, readyToSend })
     });
     const data = await resp.json();
     if (data.ok) {
       showToast('邮件已发送！');
       document.getElementById('mail-instruction').value = '';
+      delete document.getElementById('mail-instruction').dataset.readyToSend;
       // 显示小机写的内容
       document.getElementById('modal-date').textContent = '已发送：' + (data.subject || '');
       document.getElementById('modal-body').innerHTML = `收件人：${escHtml(to)}\n\n${escHtml(data.body)}`;

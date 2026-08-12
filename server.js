@@ -11,6 +11,7 @@ const CryptoJS = require('crypto-js');
 const forge = require('node-forge');
 const path = require('path');
 const multer = require('multer');
+const { Readable } = require('stream');
 const { google } = require('googleapis');
 
 const app = express();
@@ -155,31 +156,72 @@ const AI_PROXY = process.env.AI_PROXY_URL || 'https://api.anthropic.com';
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, system, model, max_tokens } = req.body;
+    const { messages, system, model, max_tokens, tools = [] } = req.body;
     const apiKey = req.headers['x-api-key'];
     if (!apiKey) return res.status(400).json({ error: { message: '缺少 API Key' } });
+    const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+    const conversation = [...messages];
+    const clientActions = [];
 
-    const resp = await fetch(`${AI_PROXY}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: model || 'claude-sonnet-4-6',
-        max_tokens: max_tokens || 1000,
-        system,
-        messages
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) return res.status(resp.status).json(data);
-    res.json(data);
+    // Complete a small server-side tool loop: the AI can search NetEase songs,
+    // select one, and return an action for the browser to play on this device.
+    for (let round = 0; round < 3; round++) {
+      const resp = await fetch(`${AI_PROXY}/v1/messages`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: max_tokens || 1000, system, messages: conversation, tools })
+      });
+      const data = await resp.json();
+      if (!resp.ok) return res.status(resp.status).json(data);
+      const toolUses = (data.content || []).filter(block => block.type === 'tool_use');
+      if (!toolUses.length) return res.json({ ...data, clientActions });
+
+      conversation.push({ role: 'assistant', content: data.content });
+      const toolResults = await Promise.all(toolUses.map(async tool => {
+        try {
+          if (tool.name === 'search_music') {
+            const songs = await searchNeteaseMusic(tool.input.query, 5);
+            return { type: 'tool_result', tool_use_id: tool.id, content: JSON.stringify(songs) };
+          }
+          if (tool.name === 'play_music') {
+            const { songId, name, artist } = tool.input;
+            if (!Number.isInteger(Number(songId))) throw new Error('无效歌曲 ID');
+            clientActions.push({ type: 'play_music', songId: Number(songId), name: name || '未知歌曲', artist: artist || '' });
+            return { type: 'tool_result', tool_use_id: tool.id, content: '已安排在用户当前设备的网页播放器中播放。' };
+          }
+          if (tool.name === 'edit_diary') {
+            const { rawInput = '', diaryText, save = false } = tool.input;
+            if (!diaryText) throw new Error('日记正文不能为空');
+            clientActions.push({ type: 'edit_diary', rawInput, diaryText, save: Boolean(save) });
+            return { type: 'tool_result', tool_use_id: tool.id, content: save ? '日记已写入并保存。' : '日记已写入编辑区，等待用户确认保存。' };
+          }
+          if (tool.name === 'compose_email') {
+            const { to = '', subject = '', body } = tool.input;
+            if (!body) throw new Error('邮件正文不能为空');
+            clientActions.push({ type: 'compose_email', to, subject, body });
+            return { type: 'tool_result', tool_use_id: tool.id, content: '邮件草稿已填入邮件页面，尚未发送，需用户点击发送。' };
+          }
+          throw new Error('不支持的工具');
+        } catch (error) {
+          return { type: 'tool_result', tool_use_id: tool.id, is_error: true, content: error.message };
+        }
+      }));
+      conversation.push({ role: 'user', content: toolResults });
+    }
+    res.status(502).json({ error: { message: '工具调用次数过多，请重试' } });
   } catch (e) {
     res.status(500).json({ error: { message: e.message } });
   }
 });
+
+async function searchNeteaseMusic(query, limit = 20) {
+  const q = String(query || '').trim();
+  if (!q) throw new Error('缺少搜索词');
+  const weapiData = neWeapi({ s: q, type: 1, offset: 0, limit: Math.min(Math.max(Number(limit) || 20, 1), 20), total: true });
+  const resp = await fetch('https://music.163.com/weapi/search/get', { method: 'POST', headers: NE_HEADERS, body: new URLSearchParams(weapiData).toString() });
+  if (!resp.ok) throw new Error(`网易云搜索失败 (${resp.status})`);
+  const data = await resp.json();
+  return (data.result?.songs || []).map(s => ({ id: s.id, name: s.name, artist: (s.artists || []).map(a => a.name).join(' / '), album: s.album?.name || '' }));
+}
 
 // ═══════════════════════════════════════
 //  网易云音乐
@@ -188,23 +230,7 @@ app.post('/api/chat', async (req, res) => {
 // 搜索歌曲
 app.get('/api/music/search', async (req, res) => {
   try {
-    const q = req.query.q || '';
-    if (!q) return res.status(400).json({ error: '缺少搜索词' });
-    const limit = parseInt(req.query.limit) || 20;
-    const weapiData = neWeapi({ s: q, type: 1, offset: 0, limit, total: true });
-    const resp = await fetch('https://music.163.com/weapi/search/get', {
-      method: 'POST',
-      headers: NE_HEADERS,
-      body: new URLSearchParams(weapiData).toString()
-    });
-    const data = await resp.json();
-    const songs = (data.result?.songs || []).map(s => ({
-      id: s.id,
-      name: s.name,
-      artist: (s.artists || []).map(a => a.name).join(' / '),
-      album: s.album?.name || '',
-      duration: s.duration
-    }));
+    const songs = await searchNeteaseMusic(req.query.q, parseInt(req.query.limit) || 20);
     res.json({ songs });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -274,23 +300,17 @@ app.get('/api/music/stream/:id', async (req, res) => {
     if (!songData || !songData.url) {
       return res.status(404).json({ error: '无法获取播放链接' });
     }
-    const audioResp = await fetch(songData.url, {
-      headers: { 'User-Agent': NE_HEADERS['User-Agent'], 'Referer': 'https://music.163.com' }
-    });
-    res.setHeader('Content-Type', audioResp.headers.get('content-type') || 'audio/mpeg');
-    res.setHeader('Content-Length', audioResp.headers.get('content-length') || '');
-    if (req.headers.range) {
-      const rangeResp = await fetch(songData.url, {
-        headers: { 'User-Agent': NE_HEADERS['User-Agent'], 'Referer': 'https://music.163.com', 'Range': req.headers.range }
-      });
-      res.status(rangeResp.status);
-      res.setHeader('Content-Range', rangeResp.headers.get('content-range') || '');
-      res.setHeader('Accept-Ranges', 'bytes');
-      const buf = Buffer.from(await rangeResp.arrayBuffer());
-      return res.send(buf);
+    const headers = { 'User-Agent': NE_HEADERS['User-Agent'], 'Referer': 'https://music.163.com' };
+    if (req.headers.range) headers.Range = req.headers.range;
+    const audioResp = await fetch(songData.url, { headers });
+    if (!audioResp.ok && audioResp.status !== 206) throw new Error(`音频源返回 ${audioResp.status}`);
+    res.status(audioResp.status);
+    for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const value = audioResp.headers.get(header);
+      if (value) res.setHeader(header, value);
     }
-    const buf = Buffer.from(await audioResp.arrayBuffer());
-    res.send(buf);
+    if (!audioResp.body) return res.end();
+    Readable.fromWeb(audioResp.body).pipe(res);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -472,22 +492,20 @@ app.post('/api/gmail/draft-and-send', async (req, res) => {
   try {
     const gmail = getAuthedGmail(req);
     if (!gmail) return res.status(400).json({ error: 'Gmail 未授权' });
-    const { to, subject, instruction, memory } = req.body;
+    const { to, subject, instruction, memory, readyToSend = false } = req.body;
     const apiKey = req.headers['x-api-key'] || req.body.apiKey;
     if (!to || !instruction) return res.status(400).json({ error: '缺少收件人或写信意图' });
     if (!apiKey) return res.status(400).json({ error: '缺少 AI API Key，请先在设置中填写' });
 
-    const sys = `你是小机，正在帮用户写一封邮件。根据用户的描述，用得体、自然的中文写邮件正文。直接输出邮件正文HTML，不加标题、不加解释、不要写"收件人"等抬头。语气根据用户描述调整。`;
-    const userMsg = `收件人：${to}\n主题：${subject || '(由你拟定)'}\n用户的写信意图：${instruction}${memory ? '\n\n用户信息：' + memory : ''}`;
-
-    const aiResp = await fetch(`${AI_PROXY}/v1/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: sys, messages: [{ role: 'user', content: userMsg }] })
-    });
-    const aiData = await aiResp.json();
-    if (!aiResp.ok) return res.status(aiResp.status).json(aiData);
-    const emailBody = aiData.content?.[0]?.text;
+    let emailBody = instruction;
+    if (!readyToSend) {
+      const sys = `你是小机，正在帮用户写一封邮件。根据用户的描述，用得体、自然的中文写邮件正文。直接输出邮件正文HTML，不加标题、不加解释、不要写"收件人"等抬头。语气根据用户描述调整。`;
+      const userMsg = `收件人：${to}\n主题：${subject || '(由你拟定)'}\n用户的写信意图：${instruction}${memory ? '\n\n用户信息：' + memory : ''}`;
+      const aiResp = await fetch(`${AI_PROXY}/v1/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: sys, messages: [{ role: 'user', content: userMsg }] }) });
+      const aiData = await aiResp.json();
+      if (!aiResp.ok) return res.status(aiResp.status).json(aiData);
+      emailBody = aiData.content?.[0]?.text;
+    }
     if (!emailBody) return res.status(502).json({ error: 'AI 未返回邮件正文' });
     const finalSubject = subject || '来自小机的邮件';
 
