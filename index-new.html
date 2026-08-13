@@ -660,7 +660,7 @@
     <div class="settings-group">
       <div class="settings-px-title">// NETEASE ACCOUNT（可选）</div>
       <div class="settings-card">
-        <label>在 <a href="https://music.163.com" target="_blank" rel="noopener">music.163.com</a> 登录后，从浏览器 Cookie 中复制完整 Cookie。它仅保存在本次 Render 服务内存中，用于请求你的正版播放权限；不要填写密码。</label>
+        <label>在 <a href="https://music.163.com" target="_blank" rel="noopener">music.163.com</a> 登录后，从浏览器 Cookie 中复制完整 Cookie。启用后会加密保存在此浏览器，重新打开页面会自动连接；不要填写密码，也不要在公共设备启用。</label>
         <textarea id="music-cookie-input" placeholder="MUSIC_U=...; __csrf=..." style="min-height:70px;"></textarea>
         <button class="px-btn" style="margin-top:8px;" onclick="connectMusicAccount()">[ CONNECT ]</button>
         <button class="px-btn" style="margin-top:8px;" onclick="disconnectMusicAccount()">[ LOG OUT ]</button>
@@ -786,6 +786,7 @@ function init() {
   loadChatHistory();
   tickClock();
   checkBackend();
+  restoreMusicAccount();
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
@@ -967,6 +968,26 @@ function musicHeaders(headers = {}) {
   const sessionId = sessionStorage.getItem('music_session_id');
   return sessionId ? { ...headers, 'x-music-session': sessionId } : headers;
 }
+const MUSIC_COOKIE_KEY = 'music_account_cookie_v1';
+const MUSIC_KEY_KEY = 'music_account_key_v1';
+async function encryptMusicCookie(value) {
+  const key = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cryptoKey = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']);
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(value));
+  const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  localStorage.setItem(MUSIC_KEY_KEY, b64(key));
+  return JSON.stringify({ iv: b64(iv), data: b64(encrypted) });
+}
+async function decryptMusicCookie(payload) {
+  const keyB64 = localStorage.getItem(MUSIC_KEY_KEY);
+  if (!keyB64) throw new Error('缺少本地密钥');
+  const fromB64 = value => Uint8Array.from(atob(value), c => c.charCodeAt(0));
+  const { iv, data } = JSON.parse(payload);
+  const cryptoKey = await crypto.subtle.importKey('raw', fromB64(keyB64), 'AES-GCM', false, ['decrypt']);
+  const result = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(iv) }, cryptoKey, fromB64(data));
+  return new TextDecoder().decode(result);
+}
 async function connectMusicAccount() {
   const input = document.getElementById('music-cookie-input');
   const cookie = input ? input.value.trim() : '';
@@ -976,13 +997,27 @@ async function connectMusicAccount() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || '登录连接失败');
     sessionStorage.setItem('music_session_id', data.sessionId);
+    localStorage.setItem(MUSIC_COOKIE_KEY, await encryptMusicCookie(cookie));
     input.value = '';
-    showToast('网易云账号已连接；仅本次服务有效');
+    showToast('网易云账号已连接，并会在此浏览器自动恢复');
   } catch (e) { showToast(e.message); }
+}
+async function restoreMusicAccount() {
+  const saved = localStorage.getItem(MUSIC_COOKIE_KEY);
+  if (!saved || sessionStorage.getItem('music_session_id')) return;
+  try {
+    const cookie = await decryptMusicCookie(saved);
+    const r = await fetch(API_BASE + '/api/music/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cookie }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || '登录已失效');
+    sessionStorage.setItem('music_session_id', data.sessionId);
+    showToast('网易云账号已自动连接');
+  } catch (e) { localStorage.removeItem(MUSIC_COOKIE_KEY); localStorage.removeItem(MUSIC_KEY_KEY); }
 }
 async function disconnectMusicAccount() {
   await fetch(API_BASE + '/api/music/session', { method: 'DELETE', headers: musicHeaders() }).catch(() => {});
   sessionStorage.removeItem('music_session_id');
+  localStorage.removeItem(MUSIC_COOKIE_KEY); localStorage.removeItem(MUSIC_KEY_KEY);
   showToast('已断开网易云账号');
 }
 function loadSettings() {
@@ -1050,7 +1085,7 @@ async function sendMessage(imageData) {
     let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。回答“今天/昨天/明天/刚才/多久后”等问题必须据此推算，并同时说出明确日期与时间，不能凭空猜测。`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
     const playing = JSON.parse(localStorage.getItem('current_song') || 'null');
-    if (playing) sys += `\n\n用户当前正在听：${playing.name} - ${playing.artist}（网易云歌曲 ID: ${playing.songId}）。当用户问正在播放什么、换歌或暂停时，请结合这个状态回答。`;
+    if (playing) sys += `\n\n用户当前正在听：${playing.name} - ${playing.artist}（网易云歌曲 ID: ${playing.songId}），进度约 ${playing.currentTime || 0} 秒；当前歌词句：${playing.currentLyric || '尚未进入有歌词的段落'}。当用户问正在播放什么、歌词唱到哪里或换歌时，请结合这个状态回答。`;
 
     const resp = await fetch(API_BASE + '/api/chat', {
       method: 'POST',
@@ -1467,6 +1502,30 @@ async function searchMusic() {
 }
 
 let currentSongId = null;
+let syncedLyrics = [];
+let currentLyricLine = '';
+
+function parseLrc(lrc = '') {
+  const entries = [];
+  for (const line of lrc.split(/\r?\n/)) {
+    const text = line.replace(/\[[^\]]+\]/g, '').trim();
+    const times = [...line.matchAll(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g)];
+    for (const match of times) entries.push({ time: Number(match[1]) * 60 + Number(match[2]) + Number('0.' + (match[3] || '0')), text });
+  }
+  return entries.filter(item => item.text).sort((a, b) => a.time - b.time);
+}
+function syncLyrics(currentTime) {
+  const index = syncedLyrics.reduce((last, line, i) => line.time <= currentTime ? i : last, -1);
+  const active = index >= 0 ? syncedLyrics[index] : null;
+  if (!active || active.text === currentLyricLine) return;
+  currentLyricLine = active.text;
+  const display = document.getElementById('np-lyrics');
+  display.innerHTML = syncedLyrics.map((line, i) => `<div style="${i === index ? 'color:var(--green);font-weight:bold;' : ''}">${escHtml(line.text)}</div>`).join('');
+  const activeNode = display.children[index];
+  if (activeNode) activeNode.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const song = JSON.parse(localStorage.getItem('current_song') || '{}');
+  localStorage.setItem('current_song', JSON.stringify({ ...song, currentTime: Math.floor(currentTime), currentLyric: active.text, updatedAt: new Date().toISOString() }));
+}
 
 async function playDirectMusicUrl(player, songId) {
   const response = await fetch(`${API_BASE}/api/music/url/${encodeURIComponent(songId)}`, { headers: musicHeaders() });
@@ -1506,6 +1565,7 @@ async function playSong(songId, name, artist, fromAssistant = false) {
       showToast('网页播放失败：' + error.message);
     }
   };
+  player.ontimeupdate = () => syncLyrics(player.currentTime);
   showToast((fromAssistant ? '小机为你点播：' : '正在加载：') + name);
   // 加载歌词
   loadLyrics(songId);
@@ -1524,7 +1584,9 @@ async function loadLyrics(songId) {
   try {
     const resp = await fetch(API_BASE + '/api/music/lyric/' + songId);
     const data = await resp.json();
-    document.getElementById('np-lyrics').textContent = data.lyric || '(无歌词)';
+    syncedLyrics = parseLrc(data.lyric);
+    currentLyricLine = '';
+    if (!syncedLyrics.length) document.getElementById('np-lyrics').textContent = data.lyric || '(无歌词)';
   } catch(e) {
     document.getElementById('np-lyrics').textContent = '(歌词获取失败)';
   }
