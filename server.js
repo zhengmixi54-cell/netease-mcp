@@ -10,12 +10,19 @@ const express = require('express');
 const CryptoJS = require('crypto-js');
 const forge = require('node-forge');
 const path = require('path');
+const crypto = require('crypto');
 const multer = require('multer');
 const { Readable } = require('stream');
 const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const musicSessions = new Map();
+
+function musicCookie(req) {
+  const id = req.headers['x-music-session'] || req.query.session;
+  return id ? musicSessions.get(id) : null;
+}
 
 // ── 文件上传中间件（内存存储，不落盘） ──
 const upload = multer({
@@ -42,6 +49,21 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index-new.html')))
 // ── 服务信息 ──
 app.get('/api/server-info', (req, res) => {
   res.json({ ok: true, version: '2.2.0', time: new Date().toISOString() });
+});
+
+// The browser never sends an account password to this service. It sends a
+// NetEase web-session cookie after the user signs in on music.163.com.
+app.post('/api/music/session', async (req, res) => {
+  const cookie = String(req.body.cookie || '').trim();
+  if (!cookie || cookie.length < 20) return res.status(400).json({ error: '请输入有效的网易云网页登录 Cookie' });
+  const sessionId = crypto.randomUUID();
+  musicSessions.set(sessionId, cookie);
+  res.json({ ok: true, sessionId });
+});
+
+app.delete('/api/music/session', (req, res) => {
+  musicSessions.delete(req.headers['x-music-session']);
+  res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════
@@ -213,11 +235,11 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-async function searchNeteaseMusic(query, limit = 20) {
+async function searchNeteaseMusic(query, limit = 20, cookie = '') {
   const q = String(query || '').trim();
   if (!q) throw new Error('缺少搜索词');
   const weapiData = neWeapi({ s: q, type: 1, offset: 0, limit: Math.min(Math.max(Number(limit) || 20, 1), 20), total: true });
-  const resp = await fetch('https://music.163.com/weapi/search/get', { method: 'POST', headers: NE_HEADERS, body: new URLSearchParams(weapiData).toString() });
+  const resp = await fetch('https://music.163.com/weapi/search/get', { method: 'POST', headers: { ...NE_HEADERS, ...(cookie ? { Cookie: cookie } : {}) }, body: new URLSearchParams(weapiData).toString() });
   if (!resp.ok) throw new Error(`网易云搜索失败 (${resp.status})`);
   const data = await resp.json();
   return (data.result?.songs || []).map(s => ({ id: s.id, name: s.name, artist: (s.artists || []).map(a => a.name).join(' / '), album: s.album?.name || '' }));
@@ -230,7 +252,7 @@ async function searchNeteaseMusic(query, limit = 20) {
 // 搜索歌曲
 app.get('/api/music/search', async (req, res) => {
   try {
-    const songs = await searchNeteaseMusic(req.query.q, parseInt(req.query.limit) || 20);
+    const songs = await searchNeteaseMusic(req.query.q, parseInt(req.query.limit) || 20, musicCookie(req));
     res.json({ songs });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -243,7 +265,7 @@ app.get('/api/music/lyric/:id', async (req, res) => {
     const weapiData = neWeapi({ id: req.params.id, lv: -1, tv: -1, kv: -1 });
     const resp = await fetch('https://music.163.com/weapi/song/lyric', {
       method: 'POST',
-      headers: NE_HEADERS,
+      headers: { ...NE_HEADERS, ...(musicCookie(req) ? { Cookie: musicCookie(req) } : {}) },
       body: new URLSearchParams(weapiData).toString()
     });
     const data = await resp.json();
@@ -265,7 +287,7 @@ app.get('/api/music/url/:id', async (req, res) => {
     });
     const resp = await fetch('https://music.163.com/weapi/song/enhance/player/url/v1', {
       method: 'POST',
-      headers: NE_HEADERS,
+      headers: { ...NE_HEADERS, ...(musicCookie(req) ? { Cookie: musicCookie(req) } : {}) },
       body: new URLSearchParams(weapiData).toString()
     });
     const data = await resp.json();
@@ -292,7 +314,7 @@ app.get('/api/music/stream/:id', async (req, res) => {
     });
     const resp = await fetch('https://music.163.com/weapi/song/enhance/player/url/v1', {
       method: 'POST',
-      headers: NE_HEADERS,
+      headers: { ...NE_HEADERS, ...(musicCookie(req) ? { Cookie: musicCookie(req) } : {}) },
       body: new URLSearchParams(weapiData).toString()
     });
     const data = await resp.json();
@@ -300,7 +322,7 @@ app.get('/api/music/stream/:id', async (req, res) => {
     if (!songData || !songData.url) {
       return res.status(404).json({ error: '无法获取播放链接' });
     }
-    const headers = { 'User-Agent': NE_HEADERS['User-Agent'], 'Referer': 'https://music.163.com' };
+    const headers = { 'User-Agent': NE_HEADERS['User-Agent'], 'Referer': 'https://music.163.com', ...(musicCookie(req) ? { Cookie: musicCookie(req) } : {}) };
     if (req.headers.range) headers.Range = req.headers.range;
     const audioResp = await fetch(songData.url, { headers });
     if (!audioResp.ok && audioResp.status !== 206) throw new Error(`音频源返回 ${audioResp.status}`);
