@@ -909,19 +909,9 @@ async function pullChatFromCloud() {
       chatHistory = data.messages;
       localStorage.setItem('chat_history', JSON.stringify(chatHistory));
       // 重新渲染
-      document.getElementById('messages-wrap').innerHTML = '';
-      if (chatHistory.length) {
-        document.getElementById('chat-empty').style.display = 'none';
-        chatHistory.forEach(m => appendBubble(m.role, m.content, m.time));
-        const wrap = document.getElementById('messages-wrap');
-        setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
-      } else {
-        document.getElementById('messages-wrap').innerHTML = `
-          <div class="chat-empty" id="chat-empty">
-            <div class="px-logo">* XIAOJI *<br>v2.0.0</div>
-            <p>今天过得怎么样？<br>随便说点什么吧。</p>
-          </div>`;
-      }
+      renderChat();
+      const wrap = document.getElementById('messages-wrap');
+      setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
       const time = new Date(data.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
       showToast(`已拉取 ${chatHistory.length} 条（更新于 ${time}）`);
     } else {
@@ -942,8 +932,7 @@ async function tryCloudPullOnStartup() {
     if (data.ok && data.messages && data.messages.length) {
       chatHistory = data.messages;
       localStorage.setItem('chat_history', JSON.stringify(chatHistory));
-      document.getElementById('chat-empty').style.display = 'none';
-      chatHistory.forEach(m => appendBubble(m.role, m.content, m.time));
+      renderChat();
       const wrap = document.getElementById('messages-wrap');
       setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
       const time = new Date(data.updated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
@@ -1055,7 +1044,8 @@ async function sendMessage(imageData) {
   ta.value = '';
   ta.style.height = 'auto';
   document.getElementById('send-btn').disabled = true;
-  document.getElementById('chat-empty').style.display = 'none';
+  const chatEmpty = document.getElementById('chat-empty');
+  if (chatEmpty) chatEmpty.style.display = 'none';
 
   const ts = timestamp();
   let userContent;
@@ -1186,7 +1176,8 @@ async function handleFile(event) {
   const fileName = file.name;
   const fileSizeKB = (file.size / 1024).toFixed(1);
   renderChat();
-  document.getElementById('chat-empty').style.display = 'none';
+  const chatEmpty = document.getElementById('chat-empty');
+  if (chatEmpty) chatEmpty.style.display = 'none';
 
   // 插入一个"解析中"的typing
   const typingId = 'typing-' + Date.now();
