@@ -31,12 +31,11 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { height: 100%; }
+    html { height: 100%; overflow: hidden; }
     body {
+      position: fixed; inset: 0; width: 100%;
       height: 100vh; height: 100dvh;
       overflow: hidden;
-      max-width: 100vw;
-      overflow-x: hidden;
     }
 
     body {
@@ -109,8 +108,10 @@
     .nav-btn.active { color: var(--pink); }
 
     /* ── PAGES ── */
-    .page { display: none; flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: 62px; flex-direction: column; max-width: 100vw; }
+    .page { display: none; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 62px; flex-direction: column; max-width: 100%; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     .page.active { display: flex; }
+    /* 聊天页禁止外层滚动，只允许消息区内部滚动（修复 iOS 无法上下拖动） */
+    #page-chat { overflow: hidden; }
 
     /* ══════════════════════════
        CHAT
@@ -149,9 +150,9 @@
     .header-btn { padding: 5px 10px; border-radius: 0; white-space: nowrap; }
 
     .messages-wrap {
-      flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 14px 8px;
+      flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 14px 8px;
       display: flex; flex-direction: column; gap: 14px;
-      max-width: 100%; -webkit-overflow-scrolling: touch;
+      max-width: 100%; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     }
     .chat-empty {
       flex: 1; display: flex; flex-direction: column;
@@ -1186,14 +1187,15 @@ function init() {
   renderHistory();
   loadSessions();
   loadChatHistoryFromSession();
+  // 启动时自动从云端合并恢复聊天记录（iOS PWA/换设备/本地数据被清时找回历史）
+  tryCloudPullOnStartup();
   renderMoodPage();
   renderMemoryBankList();
+  // 云端记忆库也自动拉取合并（静默模式，不弹 toast）
+  syncMemoryBank(false, true);
   tickClock();
   checkBackend();
   restoreMusicAccount();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
 }
 
 async function checkBackend() {
@@ -2302,30 +2304,64 @@ function syncChatToCloud(silent) {
 function pullChatFromCloud() {
   const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
   if (!ready) { showToast('请先在设置页填写同步码和 Supabase'); switchPage('settings'); return; }
-  if (chatHistory.length && !confirm('本地已有聊天记录，确定用云端覆盖？')) return;
   const tz = new Date().getTimezoneOffset() * 60000;
   fetch(API_BASE + '/api/chat/sync?code=' + encodeURIComponent(syncCode) + '&sbUrl=' + encodeURIComponent(sbUrl) + '&sbKey=' + encodeURIComponent(sbKey))
     .then(r => r.json()).then(data => {
-      if (data.messages) {
-        if (Array.isArray(data.messages) && data.messages.length && data.messages[0] && data.messages[0].id) {
-          // 多会话格式
-          chatSessions = data.messages.map(s => ({ id: s.id || ('session-' + Math.random()), title: s.title || '新对话', messages: s.messages || [], created_at: s.created_at || new Date().toISOString(), updated_at: s.updated_at || new Date().toISOString() }));
-          if (!chatSessions.length) { chatSessions = [{ id: 'session-' + Date.now(), title: '新对话', messages: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; }
-          currentSessionId = chatSessions[0].id;
-          localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
-          localStorage.setItem('current_session_id', currentSessionId);
-        } else {
-          // 旧格式（单会话消息数组）
+      if (data.messages && Array.isArray(data.messages)) {
+        if (data.messages.length && data.messages[0] && data.messages[0].id) {
+          // 多会话格式：智能合并（本地更新的不会被覆盖）
+          const cloud = normalizeCloudSessions(data.messages);
+          mergeCloudSessions(cloud);
+          loadChatHistoryFromSession();
+          renderSessionsList();
+        } else if (data.messages.length && data.messages[0] && data.messages[0].role) {
+          // 旧单会话格式
           chatHistory = data.messages;
           const session = getCurrentSession();
           if (session) { session.messages = chatHistory; session.title = genSessionTitle(chatHistory); }
           localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+          loadChatHistoryFromSession();
         }
-        loadChatHistoryFromSession();
         const time = data.updated_at ? new Date(data.updated_at + tz).toLocaleString('zh-CN', { hour:'2-digit', minute:'2-digit', month:'2-digit', day:'2-digit' }) : '';
-        showToast(`已拉取 ${chatSessions.length} 个对话（更新于 ${time}）`);
+        showToast(`已同步 ${chatSessions.length} 个对话（云端更新于 ${time}）`);
       } else showToast(data.error || '拉取失败');
     }).catch(e => showToast('拉取失败: ' + e.message));
+}
+
+/* ── 云端会话智能合并：按 id 去重，保留 updated_at 更新的版本 ── */
+function mergeCloudSessions(cloudSessions) {
+  const map = new Map();
+  for (const s of chatSessions) map.set(s.id, s);
+  let changed = false;
+  for (const cs of cloudSessions) {
+    if (!cs || !cs.id) continue;
+    const local = map.get(cs.id);
+    if (!local) {
+      map.set(cs.id, cs);
+      changed = true;
+    } else if (new Date(cs.updated_at || 0) > new Date(local.updated_at || 0)) {
+      map.set(cs.id, { ...local, ...cs, injectedMemories: local.injectedMemories });
+      changed = true;
+    }
+  }
+  if (changed) {
+    chatSessions = Array.from(map.values())
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    if (!chatSessions.find(s => s.id === currentSessionId)) currentSessionId = chatSessions[0].id;
+    localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+    localStorage.setItem('current_session_id', currentSessionId);
+  }
+  return changed;
+}
+
+function normalizeCloudSessions(raw) {
+  return (raw || []).map(s => ({
+    id: s.id || ('session-' + Math.random()),
+    title: s.title || '新对话',
+    messages: s.messages || [],
+    created_at: s.created_at || new Date().toISOString(),
+    updated_at: s.updated_at || new Date().toISOString()
+  }));
 }
 
 function tryCloudPullOnStartup() {
@@ -2333,21 +2369,34 @@ function tryCloudPullOnStartup() {
   if (!ready) return;
   fetch(API_BASE + '/api/chat/sync?code=' + encodeURIComponent(syncCode) + '&sbUrl=' + encodeURIComponent(sbUrl) + '&sbKey=' + encodeURIComponent(sbKey))
     .then(r => r.json()).then(data => {
-      if (data.messages) {
-        if (Array.isArray(data.messages) && data.messages.length && data.messages[0] && data.messages[0].id) {
-          chatSessions = data.messages.map(s => ({ id: s.id || ('session-' + Math.random()), title: s.title || '新对话', messages: s.messages || [], created_at: s.created_at || new Date().toISOString(), updated_at: s.updated_at || new Date().toISOString() }));
-          if (!chatSessions.length) { chatSessions = [{ id: 'session-' + Date.now(), title: '新对话', messages: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; }
-          currentSessionId = chatSessions[0].id;
-          localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
-          localStorage.setItem('current_session_id', currentSessionId);
-        } else {
-          chatHistory = data.messages;
-          const session = getCurrentSession();
-          if (session) { session.messages = chatHistory; session.title = genSessionTitle(chatHistory); }
-          localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+      if (!data.messages || !Array.isArray(data.messages)) return;
+      // 多会话格式：智能合并，本地更新的不会被覆盖
+      if (data.messages.length && data.messages[0] && data.messages[0].id) {
+        const cloud = normalizeCloudSessions(data.messages);
+        const changed = mergeCloudSessions(cloud);
+        if (changed) {
+          // 如果当前会话为空但云端恢复了有消息的会话，自动切换到最近更新的有消息会话
+          const cur = getCurrentSession();
+          if (cur && (!cur.messages || !cur.messages.length)) {
+            const best = chatSessions.find(s => s.messages && s.messages.length);
+            if (best && best.id !== currentSessionId) {
+              currentSessionId = best.id;
+              localStorage.setItem('current_session_id', currentSessionId);
+            }
+          }
+          loadChatHistoryFromSession();
+          renderSessionsList();
+          console.log('从云端合并恢复了对话');
         }
-        loadChatHistoryFromSession();
-        console.log('从云端恢复了 ' + chatSessions.length + ' 个对话');
+      } else if (data.messages.length && data.messages[0] && data.messages[0].role) {
+        // 旧单会话格式：仅当本地当前会话为空时恢复
+        const session = getCurrentSession();
+        if (session && (!session.messages || !session.messages.length)) {
+          session.messages = data.messages;
+          session.title = genSessionTitle(data.messages);
+          localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+          loadChatHistoryFromSession();
+        }
       }
     }).catch(() => {});
 }
@@ -2690,7 +2739,7 @@ function injectMemoryToCurrent(id) {
   }
 }
 
-function syncMemoryBank(upload) {
+function syncMemoryBank(upload, silent) {
   const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
   if (!ready) return;
   const memories = getMemoryBank();
@@ -2703,16 +2752,28 @@ function syncMemoryBank(upload) {
       if (data.ok) console.log('记忆库已同步');
     }).catch(() => {});
   } else {
+    // 下载：按 id 合并，不覆盖本地独有的记忆
     fetch(API_BASE + '/api/memory/sync?code=' + encodeURIComponent(syncCode) + '&sbUrl=' + encodeURIComponent(sbUrl) + '&sbKey=' + encodeURIComponent(sbKey))
       .then(r => r.json()).then(data => {
-        if (data.ok && data.memories) {
-          saveMemoryBank(data.memories);
-          renderMemoryBankList();
-          showToast(`已拉取 ${data.memories.length} 条记忆`);
+        if (data.ok && Array.isArray(data.memories)) {
+          const map = new Map();
+          for (const m of memories) map.set(m.id, m);
+          let changed = false;
+          for (const cm of data.memories) {
+            if (cm && cm.id && !map.has(cm.id)) { map.set(cm.id, cm); changed = true; }
+          }
+          if (changed) {
+            const merged = Array.from(map.values())
+              .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+              .slice(-50);
+            saveMemoryBank(merged);
+            renderMemoryBankList();
+          }
+          if (!silent) showToast(`已同步 ${map.size} 条记忆`);
         } else {
-          showToast(data.message || '拉取失败');
+          if (!silent) showToast(data.message || '拉取失败');
         }
-      }).catch(e => showToast('拉取失败: ' + e.message));
+      }).catch(e => { if (!silent) showToast('拉取失败: ' + e.message); });
   }
 }
 
