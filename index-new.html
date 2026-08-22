@@ -110,8 +110,23 @@
     /* ── PAGES ── */
     .page { display: none; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 62px; flex-direction: column; max-width: 100%; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     .page.active { display: flex; }
-    /* 聊天页禁止外层滚动，只允许消息区内部滚动（修复 iOS 无法上下拖动） */
-    #page-chat { overflow: hidden; }
+    /* 聊天页：使用绝对定位 + padding 让消息区精确占满 header 和 input 之间的空间，彻底解决 iOS Safari flex 收缩 bug */
+    #page-chat { overflow: hidden; position: relative; display: none; flex-direction: column; }
+    #page-chat.active { display: flex; }
+    #page-chat .chat-header { position: relative; z-index: 3; flex-shrink: 0; }
+    #page-chat .chat-input-bar { position: relative; z-index: 3; flex-shrink: 0; }
+    #page-chat .messages-wrap {
+      position: absolute;
+      left: 0; right: 0;
+      top: 0; bottom: 0;
+      overflow-y: auto; overflow-x: hidden;
+      padding: 16px 14px 8px;
+      display: flex; flex-direction: column; gap: 14px;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+      -webkit-transform: translateZ(0); transform: translateZ(0);
+      z-index: 1;
+    }
 
     /* ══════════════════════════
        CHAT
@@ -1611,7 +1626,13 @@ function appendBubble(role, text, time, imgPreview, thinking, messageIndex = nul
   const actions = role === 'user' && messageIndex !== null ? `<div class="msg-actions"><button onclick="editMessage(${messageIndex})">编辑</button><button onclick="withdrawMessage(${messageIndex})">撤回</button></div>` : '';
   div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col">${thinkingHtml}<div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
   wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
+  // iOS Safari 修复：使用双重 rAF + setTimeout 确保滚动到底部
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      wrap.scrollTop = wrap.scrollHeight;
+      setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 50);
+    });
+  });
 }
 
 function renderChat() {
@@ -1619,6 +1640,13 @@ function renderChat() {
   wrap.innerHTML = '';
   if (!chatHistory.length) { wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>'; return; }
   chatHistory.forEach((m, index) => appendBubble(m.role, typeof m.content === 'string' ? m.content : '[图片或附件]', m.time, m.preview, m.thinking, index));
+  // 渲染后确保滚动到底部
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      wrap.scrollTop = wrap.scrollHeight;
+      setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 100);
+    });
+  });
 }
 function withdrawMessage(index) {
   if (chatHistory[index]?.role !== 'user') return;
@@ -1648,7 +1676,11 @@ function appendTyping(id) {
   const avatarHtml = getAvatar('assistant');
   div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col"><div class="msg-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>`;
   wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      wrap.scrollTop = wrap.scrollHeight;
+    });
+  });
 }
 function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
 function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
@@ -2095,7 +2127,14 @@ function loadChatHistoryFromSession() {
   chatHistory = session ? (session.messages || []) : [];
   renderChat();
   const wrap = document.getElementById('messages-wrap');
-  if (wrap) setTimeout(() => wrap.scrollTop = wrap.scrollHeight, 50);
+  if (wrap) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        wrap.scrollTop = wrap.scrollHeight;
+        setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 100);
+      });
+    });
+  }
 }
 
 function saveChatHistory() {
