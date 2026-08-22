@@ -110,16 +110,17 @@
     /* ── PAGES ── */
     .page { display: none; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 62px; flex-direction: column; max-width: 100%; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     .page.active { display: flex; }
-    /* 聊天页：使用绝对定位 + padding 让消息区精确占满 header 和 input 之间的空间，彻底解决 iOS Safari flex 收缩 bug */
-    #page-chat { overflow: hidden; position: relative; display: none; flex-direction: column; }
-    #page-chat.active { display: flex; }
-    #page-chat .chat-header { position: relative; z-index: 3; flex-shrink: 0; }
-    #page-chat .chat-input-bar { position: relative; z-index: 3; flex-shrink: 0; }
+    /* 聊天页：用绝对定位把 header/input 钉在两端，messages-wrap 占中间整块。
+       这是 iOS Safari 上最稳定的滚动布局，能彻底避免 flex 收缩 bug。 */
+    #page-chat { overflow: hidden; position: relative; padding-bottom: 0; }
+    #page-chat .chat-header { position: absolute; top: 0; left: 0; right: 0; z-index: 3; }
+    #page-chat .chat-input-bar { position: absolute; bottom: 0; left: 0; right: 0; z-index: 3; }
     #page-chat .messages-wrap {
-      position: absolute;
+      position: absolute !important;
       left: 0; right: 0;
-      top: 0; bottom: 0;
-      overflow-y: auto; overflow-x: hidden;
+      top: var(--chat-top, 60px);
+      bottom: var(--chat-bottom, 60px);
+      overflow-y: auto !important; overflow-x: hidden;
       padding: 16px 14px 8px;
       display: flex; flex-direction: column; gap: 14px;
       max-width: 100%;
@@ -1194,6 +1195,28 @@ function tickClock() {
 }
 setInterval(tickClock, 1000);
 
+/* ── 聊天区高度动态计算（iOS Safari 上最稳定的滚动布局） ──
+   把 chat-header 和 chat-input-bar 的实际高度测出来，
+   把 messages-wrap 的 top/bottom 用 CSS 变量精确定位，
+   这样 messages-wrap 一定能有正确高度，不会被 iOS Safari 的
+   flex 收缩 bug 压成 0。 */
+function recalcChatLayout() {
+  const page = document.getElementById('page-chat');
+  if (!page) return;
+  const header = page.querySelector('.chat-header');
+  const input = page.querySelector('.chat-input-bar');
+  const wrap = document.getElementById('messages-wrap');
+  if (!header || !input || !wrap) return;
+  const top = header.offsetHeight || 60;
+  const bottom = input.offsetHeight || 60;
+  page.style.setProperty('--chat-top', top + 'px');
+  page.style.setProperty('--chat-bottom', bottom + 'px');
+  // 重新计算后保持滚动到底部
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+  });
+}
+
 function init() {
   loadSettings();
   loadAvatars();
@@ -1211,6 +1234,18 @@ function init() {
   tickClock();
   checkBackend();
   restoreMusicAccount();
+  // 聊天区高度计算（必须在 DOM 都渲染完之后）
+  recalcChatLayout();
+  setTimeout(recalcChatLayout, 100);
+  setTimeout(recalcChatLayout, 500);
+  setTimeout(recalcChatLayout, 1500);
+  // 窗口尺寸变化时重新计算（iOS 横竖屏切换/虚拟键盘弹出）
+  window.addEventListener('resize', recalcChatLayout);
+  window.addEventListener('orientationchange', () => setTimeout(recalcChatLayout, 200));
+  // 监听 iOS 虚拟键盘弹出（visualViewport API）
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', recalcChatLayout);
+  }
 }
 
 async function checkBackend() {
@@ -1344,6 +1379,14 @@ function switchPage(name) {
   if (name === 'mail') checkGmailStatus();
   if (name === 'mood') renderMoodPage();
   if (name === 'settings') renderMemoryBankList();
+  if (name === 'chat') {
+    // 切回聊天页时重新计算布局（之前可能隐藏导致 height 拿到 0）
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      recalcChatLayout();
+      const wrap = document.getElementById('messages-wrap');
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }));
+  }
 }
 
 /* ═══════════════════════════════════════
