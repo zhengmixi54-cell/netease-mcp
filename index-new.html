@@ -689,24 +689,46 @@
     .mood-history-note { font-size: 10px; color: var(--fog); margin-top: 2px; }
 
     /* ══════════════════════════
-       THINKING CHAIN
+       THINKING CHAIN — 独立小气泡，跟主消息分开
     ══════════════════════════ */
-    .thinking-bubble {
-      background: var(--bg2); border: 1px dashed var(--b2);
-      padding: 8px 12px; margin-bottom: 4px;
-      font-size: 11px; line-height: 1.7; color: var(--fog);
-      white-space: pre-wrap; word-break: break-word;
-      max-height: 200px; overflow-y: auto; overflow-x: hidden;
-      display: block;
+    .thinking-chain {
+      margin: 0 0 6px 0;
+      max-width: 100%;
     }
     .thinking-toggle {
-      display: inline-block; font-size: 9px; color: var(--cyan);
-      cursor: pointer; margin-bottom: 4px;
-      font-family: 'Press Start 2P', monospace; letter-spacing: 0.05em;
+      display: inline-block;
+      font-size: 9px;
+      color: var(--cyan);
+      cursor: pointer;
+      padding: 3px 8px;
+      background: rgba(10,16,32,0.6);
+      border: 1px solid var(--b1);
+      font-family: 'Press Start 2P', monospace;
+      letter-spacing: 0.05em;
       user-select: none;
+      transition: color 0.15s, border-color 0.15s;
     }
-    .thinking-toggle:hover { color: var(--pink); }
-    .thinking-bubble.collapsed { display: none; }
+    .thinking-toggle:hover { color: var(--pink); border-color: var(--pink2); }
+    .thinking-toggle .arrow { display: inline-block; margin-left: 4px; transition: transform 0.2s; }
+    .thinking-toggle.expanded .arrow { transform: rotate(90deg); }
+    .thinking-bubble {
+      background: var(--bg3);
+      border: 1px solid var(--b1);
+      border-left: 3px solid var(--cyan);
+      padding: 10px 12px;
+      margin: 6px 0 8px 0;
+      font-size: 11px;
+      line-height: 1.7;
+      color: var(--mist);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 220px;
+      overflow-y: auto;
+      display: none;
+    }
+    .thinking-bubble.expanded { display: block; }
+    .thinking-bubble::-webkit-scrollbar { width: 4px; }
+    .thinking-bubble::-webkit-scrollbar-thumb { background: var(--cyan); }
 
     /* ══════════════════════════
        CUSTOM AVATAR
@@ -1246,6 +1268,7 @@ function init() {
   loadSettings();
   loadAvatars();
   checkSetup();
+  ensureThinkingEnabled(); // 默认开启思考链
   renderDiaryDate();
   renderHistory();
   loadSessions();
@@ -1685,11 +1708,10 @@ function appendBubble(role, text, time, imgPreview, thinking, messageIndex = nul
   div.className = 'msg ' + role;
   const avatarHtml = getAvatar(role);
   let bubbleHtml = '';
-  if (imgPreview) {
-    bubbleHtml = `<img src="${escAttr(imgPreview)}" alt="img"/>`;
-  }
+  if (imgPreview) bubbleHtml = `<img src="${escAttr(imgPreview)}" alt="img"/>`;
   bubbleHtml += escHtml(text);
-  const thinkingHtml = thinking ? `<span class="thinking-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed')">💭 思考过程（点击折叠/展开）</span><div class="thinking-bubble">${escHtml(thinking)}</div>` : '';
+  // 思考链：默认收起，点击 toggle 展开
+  const thinkingHtml = thinking ? `<div class="thinking-chain"><span class="thinking-toggle" onclick="var b=this.nextElementSibling; var ex=b.classList.toggle('expanded'); this.classList.toggle('expanded', ex);">💭 思考<span class="arrow">▶</span></span><div class="thinking-bubble">${escHtml(thinking)}</div></div>` : '';
   const timeHtml = time ? `<div class="msg-time">${escHtml(time)}</div>` : '';
   const actions = role === 'user' && messageIndex !== null ? `<div class="msg-actions"><button onclick="editMessage(${messageIndex})">编辑</button><button onclick="withdrawMessage(${messageIndex})">撤回</button></div>` : '';
   div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col">${thinkingHtml}<div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
@@ -1720,9 +1742,11 @@ function renderChat() {
     if (m.preview) bubbleHtml = `<img src="${escAttr(m.preview)}" alt="img"/>`;
     const text = typeof m.content === 'string' ? m.content : '[图片或附件]';
     bubbleHtml += escHtml(text);
-    const thinkingHtml = m.thinking ? `<span class="thinking-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed')">💭 思考过程（点击折叠/展开）</span><div class="thinking-bubble">${escHtml(m.thinking)}</div>` : '';
+    // 思考链：放在消息气泡**外面**（独立区域），默认收起，点击 toggle 展开
+    const thinkingHtml = m.thinking ? `<div class="thinking-chain"><span class="thinking-toggle" onclick="var b=this.nextElementSibling; var ex=b.classList.toggle('expanded'); this.classList.toggle('expanded', ex);">💭 思考<span class="arrow">▶</span></span><div class="thinking-bubble">${escHtml(m.thinking)}</div></div>` : '';
     const timeHtml = m.time ? `<div class="msg-time">${escHtml(m.time)}</div>` : '';
     const actions = m.role === 'user' ? `<div class="msg-actions"><button onclick="editMessage(${index})">编辑</button><button onclick="withdrawMessage(${index})">撤回</button></div>` : '';
+    // 关键：thinking-chain 放在 msg-col 外面，整个消息气泡上方
     div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col">${thinkingHtml}<div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
     frag.appendChild(div);
   });
@@ -2699,12 +2723,19 @@ function getMoodContext() {
 }
 
 /* ═══════════════════════════════════════
-   思考链切换
+   思考链切换（默认开启）
    ═══════════════════════════════════════ */
 function toggleThinking() {
   const btn = document.getElementById('think-toggle');
   btn.classList.toggle('active');
   showToast(btn.classList.contains('active') ? '思考链已开启' : '思考链已关闭');
+}
+// 启动时默认开启思考链
+function ensureThinkingEnabled() {
+  const btn = document.getElementById('think-toggle');
+  if (btn && !btn.classList.contains('active') && !btn.classList.contains('user-toggled')) {
+    btn.classList.add('active');
+  }
 }
 
 /* ═══════════════════════════════════════
