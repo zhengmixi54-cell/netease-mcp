@@ -151,7 +151,6 @@
 
     .messages-wrap {
       overflow-y: auto; overflow-x: hidden; padding: 16px 14px 8px;
-      display: flex; flex-direction: column; gap: 14px;
       max-width: 100%; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
       -webkit-transform: translateZ(0); transform: translateZ(0);
       /* JS recalcChatLayout 跑之前的兜底，确保不出现空白 */
@@ -1706,15 +1705,36 @@ function appendBubble(role, text, time, imgPreview, thinking, messageIndex = nul
 
 function renderChat() {
   const wrap = document.getElementById('messages-wrap');
+  if (!chatHistory.length) {
+    wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>';
+    recalcChatLayout();
+    return;
+  }
+  // 用 DocumentFragment 一次性构建所有消息，避免 iOS Safari 上多次 appendChild 触发布局错乱
+  const frag = document.createDocumentFragment();
+  chatHistory.forEach((m, index) => {
+    const div = document.createElement('div');
+    div.className = 'msg ' + m.role;
+    const avatarHtml = getAvatar(m.role);
+    let bubbleHtml = '';
+    if (m.preview) bubbleHtml = `<img src="${escAttr(m.preview)}" alt="img"/>`;
+    const text = typeof m.content === 'string' ? m.content : '[图片或附件]';
+    bubbleHtml += escHtml(text);
+    const thinkingHtml = m.thinking ? `<span class="thinking-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed')">💭 思考过程（点击折叠/展开）</span><div class="thinking-bubble">${escHtml(m.thinking)}</div>` : '';
+    const timeHtml = m.time ? `<div class="msg-time">${escHtml(m.time)}</div>` : '';
+    const actions = m.role === 'user' ? `<div class="msg-actions"><button onclick="editMessage(${index})">编辑</button><button onclick="withdrawMessage(${index})">撤回</button></div>` : '';
+    div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col">${thinkingHtml}<div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
+    frag.appendChild(div);
+  });
   wrap.innerHTML = '';
-  if (!chatHistory.length) { wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>'; recalcChatLayout(); return; }
-  chatHistory.forEach((m, index) => appendBubble(m.role, typeof m.content === 'string' ? m.content : '[图片或附件]', m.time, m.preview, m.thinking, index));
-  // 渲染后确保滚动到底部
+  wrap.appendChild(frag);
+  // 重新计算布局 + 滚动到底部（双重 rAF + setTimeout 兜底）
   recalcChatLayout();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       wrap.scrollTop = wrap.scrollHeight;
-      setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 100);
+      setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 50);
+      setTimeout(() => { wrap.scrollTop = wrap.scrollHeight; }, 200);
     });
   });
 }
