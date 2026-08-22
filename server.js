@@ -199,13 +199,8 @@ app.post('/api/chat', async (req, res) => {
 
     // Complete a small server-side tool loop: the AI can search NetEase songs,
     // select one, and return an action for the browser to play on this device.
-    // 关键：thinking 模式下直接调 Anthropic API（绕过 worker 代理），
-    // 因为 Cloudflare Worker 代理可能不透传 thinking blocks
-    const targetUrl = thinkingConfig.thinking && AI_PROXY !== 'https://api.anthropic.com'
-      ? 'https://api.anthropic.com'
-      : AI_PROXY;
     for (let round = 0; round < 3; round++) {
-      const resp = await fetch(`${targetUrl}/v1/messages`, {
+      const resp = await fetch(`${AI_PROXY}/v1/messages`, {
         method: 'POST', headers,
         body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: finalMaxTokens, system, messages: conversation, tools, ...thinkingConfig })
       });
