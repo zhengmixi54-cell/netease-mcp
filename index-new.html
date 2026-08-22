@@ -1523,15 +1523,7 @@ async function sendMessage(imageData) {
     }
     // 提取思考链
     const thinkingText = (data.content || []).filter(b => b.type === 'thinking').map(b => b.thinking).join('\n');
-    // DEBUG: 看下 AI 响应里到底有什么
-    console.log('[DEBUG] AI 响应 content blocks:', (data.content || []).map(b => ({ type: b.type, has_thinking: !!b.thinking, has_text: !!b.text, preview: (b.thinking || b.text || '').slice(0, 50) })));
-    console.log('[DEBUG] 提取的 thinkingText:', thinkingText ? thinkingText.slice(0, 100) + '...' : '(空)');
-    console.log('[DEBUG] think-toggle active?', document.getElementById('think-toggle')?.classList.contains('active'));
-    // 如果 think-toggle 开了但 AI 没返回 thinking，显示提示
-    if (document.getElementById('think-toggle')?.classList.contains('active') && !thinkingText) {
-      const types = (data.content || []).map(b => b.type).join(', ');
-      showToast('⚠ 思考链开启但AI未返回thinking (blocks: ' + (types || '无') + ')');
-    }
+    console.log('[DEBUG] thinking blocks:', (data.content || []).filter(b => b.type === 'thinking').length, 'thinkingText length:', thinkingText.length);
     const reply = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || '已帮你安排好了。';
     const replyTs = timestamp();
     chatHistory.push({ role: 'assistant', content: reply, time: replyTs, thinking: thinkingText || undefined });
@@ -1690,14 +1682,7 @@ async function handleFile(event) {
     }
     const aiData = await aiResp.json();
     const thinkingText2 = (aiData.content || []).filter(b => b.type === 'thinking').map(b => b.thinking).join('\n');
-    // DEBUG: 看下 AI 响应里到底有什么
-    console.log('[DEBUG-2] AI 响应 content blocks:', (aiData.content || []).map(b => ({ type: b.type, has_thinking: !!b.thinking, preview: (b.thinking || b.text || '').slice(0, 50) })));
-    console.log('[DEBUG-2] 提取的 thinkingText2:', thinkingText2 ? thinkingText2.slice(0, 100) + '...' : '(空)');
-    // 如果 think-toggle 开了但 AI 没返回 thinking，显示提示
-    if (document.getElementById('think-toggle')?.classList.contains('active') && !thinkingText2) {
-      const types = (aiData.content || []).map(b => b.type).join(', ');
-      showToast('⚠ 思考链开启但AI未返回thinking (blocks: ' + (types || '无') + ')');
-    }
+    console.log('[DEBUG-2] thinking blocks:', (aiData.content || []).filter(b => b.type === 'thinking').length);
     const reply = (aiData.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || aiData.content?.[0]?.text || '';
     const replyTs = timestamp();
     chatHistory.push({ role: 'assistant', content: reply, time: replyTs, thinking: thinkingText2 || undefined });
@@ -2739,19 +2724,12 @@ function getMoodContext() {
 }
 
 /* ═══════════════════════════════════════
-   思考链切换（默认开启）
+   思考链切换（默认关闭 — 中转站 worker 可能不支持 extended thinking）
    ═══════════════════════════════════════ */
 function toggleThinking() {
   const btn = document.getElementById('think-toggle');
   btn.classList.toggle('active');
   showToast(btn.classList.contains('active') ? '思考链已开启' : '思考链已关闭');
-}
-// 启动时默认开启思考链
-function ensureThinkingEnabled() {
-  const btn = document.getElementById('think-toggle');
-  if (btn && !btn.classList.contains('active') && !btn.classList.contains('user-toggled')) {
-    btn.classList.add('active');
-  }
 }
 
 /* ═══════════════════════════════════════
