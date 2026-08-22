@@ -154,7 +154,15 @@
       display: flex; flex-direction: column; gap: 14px;
       max-width: 100%; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
       -webkit-transform: translateZ(0); transform: translateZ(0);
+      /* JS recalcChatLayout 跑之前的兜底，确保不出现空白 */
+      position: absolute;
+      top: 60px; left: 0; right: 0;
+      bottom: 120px; /* 60 input + 56 nav + 4 buffer */
+      z-index: 1;
     }
+    /* chat-header 和 chat-input-bar 也给绝对定位的 fallback */
+    #page-chat .chat-header { position: absolute; top: 0; left: 0; right: 0; z-index: 3; }
+    #page-chat .chat-input-bar { position: absolute; bottom: 56px; left: 0; right: 0; z-index: 3; }
     .chat-empty {
       flex: 1; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 12px;
