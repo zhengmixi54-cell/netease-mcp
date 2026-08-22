@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════
- *  小机后端 server.js  (v2.2 — 云部署版)
- *  AI聊天代理 + 网易云音乐 + Gmail 集成
+ *  小机后端 server.js  (v2.3 — 思考链+记忆库)
+ *  AI聊天代理 + 网易云音乐 + Gmail 集成 + 思考链 + 记忆库
  * ═══════════════════════════════════════════════
  */
 
@@ -48,7 +48,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index-new.html')))
 
 // ── 服务信息 ──
 app.get('/api/server-info', (req, res) => {
-  res.json({ ok: true, version: '2.2.0', time: new Date().toISOString() });
+  res.json({ ok: true, version: '2.3.0', time: new Date().toISOString() });
 });
 
 // The browser never sends an account password to this service. It sends a
@@ -178,10 +178,22 @@ const AI_PROXY = process.env.AI_PROXY_URL || 'https://api.anthropic.com';
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, system, model, max_tokens, tools = [] } = req.body;
+    const { messages, system, model, max_tokens, tools = [], thinking } = req.body;
     const apiKey = req.headers['x-api-key'];
     if (!apiKey) return res.status(400).json({ error: { message: '缺少 API Key' } });
     const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+    // 思考链: 前端传 thinking={enabled:true} 时启用 extended thinking
+    const thinkingConfig = thinking && thinking.enabled
+      ? { thinking: { type: 'enabled', budget_tokens: Math.min(thinking.budget || 5000, 10000) } }
+      : {};
+    // 如果同时启用思考链和工具调用，需要 interleaved-thinking beta header
+    if (thinkingConfig.thinking && tools.length) {
+      headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
+    }
+    // 思考链模式下 max_tokens 需要更大
+    const finalMaxTokens = thinkingConfig.thinking
+      ? Math.max(max_tokens || 8000, 8000)
+      : (max_tokens || 1000);
     const conversation = [...messages];
     const clientActions = [];
 
@@ -190,7 +202,7 @@ app.post('/api/chat', async (req, res) => {
     for (let round = 0; round < 3; round++) {
       const resp = await fetch(`${AI_PROXY}/v1/messages`, {
         method: 'POST', headers,
-        body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: max_tokens || 1000, system, messages: conversation, tools })
+        body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: finalMaxTokens, system, messages: conversation, tools, ...thinkingConfig })
       });
       const data = await resp.json();
       if (!resp.ok) return res.status(resp.status).json(data);
@@ -619,11 +631,124 @@ app.get('/api/chat/sync', async (req, res) => {
 });
 
 // ═══════════════════════════════════════
+//  对话总结（提取记忆）
+// ═══════════════════════════════════════
+app.post('/api/summarize', async (req, res) => {
+  try {
+    const { messages, sessionTitle, memory } = req.body;
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey) return res.status(400).json({ error: { message: '缺少 API Key' } });
+    if (!messages || !messages.length) return res.status(400).json({ error: { message: '缺少对话内容' } });
+
+    // 构建对话摘要文本
+    const dialogText = messages.map(m => {
+      const role = m.role === 'user' ? '用户' : '小机';
+      let content = m.content;
+      if (Array.isArray(content)) {
+        content = content.map(c => {
+          if (c.type === 'image') return '[图片]';
+          if (c.type === 'text') return c.text;
+          return '';
+        }).join(' ');
+      }
+      return `${role}：${content}`;
+    }).join('\n\n');
+
+    const sys = `你是一个记忆提取助手。请分析以下对话，提取出关键的记忆点，包括：
+1. 用户的个人信息（名字、偏好、习惯、工作等）
+2. 重要的对话主题和结论
+3. 用户表达的情绪和态度
+4. 任何值得长期记住的事实
+
+请用简洁的条目格式输出，每条一行，总共不超过 15 条。不要输出多余的解释。
+格式示例：
+- 用户喜欢听周杰伦的歌
+- 用户在工作中遇到压力时会主动倾诉
+- 用户养了一只叫"团子"的猫`;
+
+    let userMsg = `对话标题：${sessionTitle || '未命名对话'}\n\n以下是对话内容：\n\n${dialogText}`;
+    if (memory) userMsg += `\n\n已有的用户记忆：${memory}`;
+
+    const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+    const resp = await fetch(`${AI_PROXY}/v1/messages`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys,
+        messages: [{ role: 'user', content: userMsg }]
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) return res.status(resp.status).json(data);
+    const summary = data.content?.[0]?.text || '';
+    res.json({ ok: true, summary });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════
+//  记忆库云同步
+// ═══════════════════════════════════════
+app.post('/api/memory/sync', async (req, res) => {
+  try {
+    const { syncCode, memories, sbUrl, sbKey } = req.body;
+    if (!syncCode) return res.status(400).json({ error: '缺少同步码' });
+    if (!sbUrl || !sbKey) return res.status(400).json({ error: '缺少 Supabase 配置' });
+
+    const resp = await fetch(`${sbUrl}/rest/v1/memory_bank`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': sbKey,
+        'Authorization': `Bearer ${sbKey}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        sync_code: syncCode,
+        memories: memories,
+        updated_at: new Date().toISOString()
+      })
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: `Supabase: ${errText.slice(0, 200)}` });
+    }
+    res.json({ ok: true, count: memories.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/memory/sync', async (req, res) => {
+  try {
+    const syncCode = req.query.code;
+    const sbUrl = req.query.sbUrl;
+    const sbKey = req.query.sbKey;
+    if (!syncCode) return res.status(400).json({ error: '缺少同步码' });
+    if (!sbUrl || !sbKey) return res.status(400).json({ error: '缺少 Supabase 配置' });
+
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/memory_bank?sync_code=eq.${encodeURIComponent(syncCode)}&select=memories,updated_at&order=updated_at.desc&limit=1`,
+      { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
+    );
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: `Supabase: ${errText.slice(0, 200)}` });
+    }
+    const data = await resp.json();
+    if (!data.length) return res.json({ ok: false, message: '云端无记忆' });
+    res.json({ ok: true, memories: data[0].memories, updated_at: data[0].updated_at });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════
 //  启动
 // ═══════════════════════════════════════
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  ╔══════════════════════════════════╗`);
-  console.log(`  ║  小机 v2.2 已启动 :${PORT}          ║`);
+  console.log(`  ║  小机 v2.3 已启动 :${PORT}          ║`);
   console.log(`  ║  http://localhost:${PORT}          ║`);
   console.log(`  ╚══════════════════════════════════╝`);
   if (!GMAIL_CID) {

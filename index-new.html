@@ -31,7 +31,13 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; }
+    html { height: 100%; }
+    body {
+      height: 100vh; height: 100dvh;
+      overflow: hidden;
+      max-width: 100vw;
+      overflow-x: hidden;
+    }
 
     body {
       background-color: var(--bg);
@@ -45,6 +51,7 @@
       font-size: 14px;
       display: flex;
       flex-direction: column;
+      padding-top: env(safe-area-inset-top);
     }
 
     body::after {
@@ -102,7 +109,7 @@
     .nav-btn.active { color: var(--pink); }
 
     /* ── PAGES ── */
-    .page { display: none; flex: 1; overflow-y: auto; padding-bottom: 62px; flex-direction: column; }
+    .page { display: none; flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: 62px; flex-direction: column; max-width: 100vw; }
     .page.active { display: flex; }
 
     /* ══════════════════════════
@@ -110,8 +117,10 @@
     ══════════════════════════ */
     .chat-header {
       background: var(--bg2); border-bottom: 2px solid var(--b1);
-      padding: 12px 16px; display: flex; align-items: center;
+      padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
+      display: flex; align-items: center;
       justify-content: space-between; flex-shrink: 0; gap: 8px;
+      max-width: 100%;
     }
     .chat-title-wrap { display: flex; align-items: center; gap: 10px; }
     .px-avatar {
@@ -119,7 +128,9 @@
       border: 2px solid var(--pink2); box-shadow: 3px 3px 0 #2a0d1a;
       display: flex; align-items: center; justify-content: center;
       font-size: 18px; flex-shrink: 0; image-rendering: pixelated;
+      overflow: hidden;
     }
+    .px-avatar img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
     .chat-name {
       font-family: 'Press Start 2P', monospace; font-size: 9px;
       color: var(--pink); line-height: 1.4; letter-spacing: 0.05em;
@@ -134,12 +145,13 @@
     }
     @keyframes blink-dot { 50% { opacity: 0; } }
 
-    .header-btns { display: flex; gap: 6px; }
-    .header-btn { padding: 5px 10px; border-radius: 0; }
+    .header-btns { display: flex; gap: 6px; flex-shrink: 1; flex-wrap: wrap; justify-content: flex-end; }
+    .header-btn { padding: 5px 10px; border-radius: 0; white-space: nowrap; }
 
     .messages-wrap {
-      flex: 1; overflow-y: auto; padding: 16px 14px 8px;
+      flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px 14px 8px;
       display: flex; flex-direction: column; gap: 14px;
+      max-width: 100%; -webkit-overflow-scrolling: touch;
     }
     .chat-empty {
       flex: 1; display: flex; flex-direction: column;
@@ -152,18 +164,21 @@
     }
     .chat-empty p { font-size: 12px; line-height: 2; color: var(--mist); }
 
-    .msg { display: flex; gap: 8px; max-width: 100%; }
+    .msg { display: flex; gap: 8px; max-width: 100%; overflow: hidden; }
     .msg.user { flex-direction: row-reverse; }
     .msg-avatar {
       width: 28px; height: 28px; background: var(--bg3);
       border: 2px solid var(--b1); display: flex; align-items: center;
       justify-content: center; font-size: 13px; flex-shrink: 0; margin-top: 2px;
+      overflow: hidden;
     }
+    .msg-avatar img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
     .msg.user .msg-avatar { border-color: var(--pink2); }
 
     .msg-bubble {
-      max-width: 76%; padding: 10px 13px; font-size: 13px;
+      max-width: calc(100% - 40px); padding: 10px 13px; font-size: 13px;
       line-height: 1.85; white-space: pre-wrap; word-break: break-word;
+      overflow-wrap: break-word; hyphens: auto;
     }
     .msg.assistant .msg-bubble {
       background: var(--bg3); border: 2px solid var(--b1);
@@ -184,7 +199,7 @@
       font-family: monospace; letter-spacing: 0.02em;
     }
     .msg.user .msg-time { text-align: right; }
-    .msg-col { display: flex; flex-direction: column; max-width: 76%; }
+    .msg-col { display: flex; flex-direction: column; max-width: calc(100% - 40px); min-width: 0; }
     .msg.user .msg-col { align-items: flex-end; }
 
     .typing-dot {
@@ -653,6 +668,133 @@
     .mood-history-info { flex: 1; }
     .mood-history-date { font-size: 12px; color: var(--text); }
     .mood-history-note { font-size: 10px; color: var(--fog); margin-top: 2px; }
+
+    /* ══════════════════════════
+       THINKING CHAIN
+    ══════════════════════════ */
+    .thinking-bubble {
+      background: var(--bg2); border: 1px dashed var(--b2);
+      padding: 8px 12px; margin-bottom: 4px;
+      font-size: 11px; line-height: 1.7; color: var(--fog);
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 200px; overflow-y: auto; overflow-x: hidden;
+      display: block;
+    }
+    .thinking-toggle {
+      display: inline-block; font-size: 9px; color: var(--cyan);
+      cursor: pointer; margin-bottom: 4px;
+      font-family: 'Press Start 2P', monospace; letter-spacing: 0.05em;
+      user-select: none;
+    }
+    .thinking-toggle:hover { color: var(--pink); }
+    .thinking-bubble.collapsed { display: none; }
+
+    /* ══════════════════════════
+       CUSTOM AVATAR
+    ══════════════════════════ */
+    .avatar-settings-row { display: flex; gap: 16px; }
+    .avatar-upload-box {
+      width: 64px; height: 64px; background: var(--bg2);
+      border: 2px dashed var(--b2); display: flex; align-items: center;
+      justify-content: center; font-size: 28px; cursor: pointer;
+      flex-shrink: 0; position: relative; overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .avatar-upload-box:hover { border-color: var(--pink2); }
+    .avatar-upload-box img { width: 100%; height: 100%; object-fit: cover; }
+    .avatar-upload-box input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .avatar-label { font-size: 10px; color: var(--fog); text-align: center; margin-top: 4px; }
+    .avatar-reset-btn {
+      font-size: 9px; color: var(--mist); background: none;
+      border: 1px solid var(--b1); padding: 3px 8px; cursor: pointer;
+      margin-top: 4px; display: block;
+    }
+
+    /* ══════════════════════════
+       MEMORY BANK
+    ══════════════════════════ */
+    .memory-bank-list { }
+    .memory-item {
+      background: var(--bg3); border: 1px solid var(--b1);
+      border-left: 3px solid var(--cyan);
+      padding: 10px 12px; margin-bottom: 8px; position: relative;
+    }
+    .memory-item-title {
+      font-size: 11px; color: var(--cyan); margin-bottom: 4px;
+      font-family: 'Press Start 2P', monospace; font-size: 7px; letter-spacing: 0.05em;
+    }
+    .memory-item-text { font-size: 11px; color: var(--soft); line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+    .memory-item-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    .memory-item-time { font-size: 9px; color: var(--fog); }
+    .memory-item-actions { display: flex; gap: 6px; }
+    .memory-item-actions button {
+      background: none; border: 1px solid var(--b2); color: var(--mist);
+      font-size: 9px; padding: 2px 6px; cursor: pointer; border-radius: 0;
+    }
+    .memory-item-actions button:hover { color: var(--pink); border-color: var(--pink2); }
+    .memory-empty-state { text-align: center; padding: 24px 0; color: var(--fog); font-size: 11px; line-height: 2.2; }
+
+    /* ── MEMORY INJECTION MODAL ── */
+    .memory-inject-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(5,5,10,0.88); z-index: 200;
+      padding: 20px 14px; overflow-y: auto;
+    }
+    .memory-inject-overlay.open { display: flex; align-items: flex-start; justify-content: center; }
+    .memory-inject-box {
+      background: var(--bg2); border: 2px solid var(--cyan);
+      box-shadow: 6px 6px 0 #051020; padding: 20px 18px;
+      max-width: 500px; width: 100%; margin: auto;
+    }
+    .memory-inject-title {
+      font-family: 'Press Start 2P', monospace; font-size: 9px;
+      color: var(--cyan); letter-spacing: 0.1em; margin-bottom: 4px;
+    }
+    .memory-inject-sub { font-size: 10px; color: var(--fog); margin-bottom: 14px; }
+    .memory-inject-list { max-height: 300px; overflow-y: auto; overflow-x: hidden; margin-bottom: 14px; }
+    .memory-inject-item {
+      display: flex; gap: 8px; align-items: flex-start;
+      background: var(--bg3); border: 1px solid var(--b1);
+      padding: 8px 10px; margin-bottom: 6px; cursor: pointer;
+      transition: border-color 0.12s;
+    }
+    .memory-inject-item:hover { border-color: var(--cyan); }
+    .memory-inject-item.selected { border-color: var(--cyan); background: #0a1020; }
+    .memory-inject-item input { margin-top: 3px; flex-shrink: 0; }
+    .memory-inject-item-content { flex: 1; min-width: 0; }
+    .memory-inject-item-title { font-size: 10px; color: var(--cyan); margin-bottom: 2px; }
+    .memory-inject-item-text { font-size: 10px; color: var(--soft); line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
+    .memory-inject-actions { display: flex; gap: 10px; }
+    .memory-inject-btn {
+      flex: 1; background: #0a1020; border: 2px solid var(--cyan);
+      box-shadow: 3px 3px 0 #051020; padding: 10px;
+      color: var(--cyan); font-size: 12px; cursor: pointer;
+      font-family: 'Noto Sans SC', sans-serif;
+      transition: box-shadow 0.08s, transform 0.08s;
+    }
+    .memory-inject-btn:active { box-shadow: 1px 1px 0 #051020; transform: translate(2px,2px); }
+    .memory-inject-btn.secondary { border-color: var(--b2); color: var(--mist); box-shadow: 3px 3px 0 var(--b2); background: var(--bg3); }
+
+    /* ── THINKING TOGGLE BUTTON ── */
+    .think-toggle-btn {
+      width: 36px; height: 42px; background: var(--bg3);
+      border: 2px solid var(--b2); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 14px; color: var(--fog);
+      transition: all 0.12s;
+    }
+    .think-toggle-btn.active { border-color: var(--cyan); color: var(--cyan); background: #0a1020; }
+    .think-toggle-btn:active { transform: scale(0.95); }
+
+    /* ── iOS SMALL SCREEN FIXES ── */
+    @media (max-width: 380px) {
+      .chat-header { padding: 10px 10px; gap: 4px; }
+      .header-btn { padding: 5px 8px; font-size: 11px; }
+      .messages-wrap { padding: 12px 10px 8px; }
+      .mood-emoji-grid { grid-template-columns: repeat(3, 1fr); }
+      .nav-btn { font-size: 7px; padding: 6px 6px; }
+      .nav-btn svg { width: 16px; height: 16px; }
+    }
   </style>
 </head>
 <body>
@@ -688,15 +830,15 @@
     </div>
     <div class="header-btns">
       <button class="px-btn header-btn" onclick="toggleSessions()" title="会话列表">≡</button>
+      <button class="px-btn header-btn" onclick="summarizeToMemory()" title="总结为记忆">🧠</button>
       <button class="px-btn header-btn" onclick="syncChatMenu()" title="云同步">☁</button>
       <button class="px-btn header-btn" onclick="clearChat()">清空</button>
-      <button class="px-btn-pink header-btn" onclick="exportChatToDiary()">→ 日记</button>
     </div>
   </div>
 
   <div class="messages-wrap" id="messages-wrap">
     <div class="chat-empty" id="chat-empty">
-      <div class="px-logo">* XIAOJI *<br>v2.0.0</div>
+      <div class="px-logo">* XIAOJI *<br>v2.3.0</div>
       <p>今天过得怎么样？<br>随便说点什么吧。</p>
     </div>
   </div>
@@ -706,6 +848,7 @@
     <input type="file" id="file-input" accept=".md,.txt,.pdf,.docx,.doc,.json,.csv,.log,.html,.htm,.xml,.yml,.yaml,.rtf,.py,.js,.ts,.java,.c,.cpp,.go,.rs,.rb,.php,.sh,.bat,.ps1,.sql,.css,.scss" style="display:none" onchange="handleFile(event)"/>
     <button class="img-thumb-btn" onclick="document.getElementById('img-input').click()" title="图片">🖼</button>
     <button class="img-thumb-btn" onclick="document.getElementById('file-input').click()" title="上传文件">📎</button>
+    <button class="think-toggle-btn" id="think-toggle" onclick="toggleThinking()" title="思考链">💭</button>
     <textarea id="chat-textarea" rows="1" placeholder="> 说点什么…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     <button class="send-btn" id="send-btn" onclick="sendMessage()">
       <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
@@ -829,10 +972,46 @@
       </div>
     </div>
     <div class="settings-group">
+      <div class="settings-px-title">// AVATARS</div>
+      <div class="settings-card">
+        <label>自定义头像（点击上传图片，留空用默认 emoji）</label>
+        <div class="avatar-settings-row">
+          <div>
+            <div class="avatar-upload-box" id="ai-avatar-box">
+              🌙
+              <input type="file" accept="image/*" onchange="uploadAvatar(event,'ai')" />
+            </div>
+            <div class="avatar-label">AI 头像</div>
+            <button class="avatar-reset-btn" onclick="resetAvatar('ai')">[ 重置 ]</button>
+          </div>
+          <div>
+            <div class="avatar-upload-box" id="user-avatar-box">
+              ★
+              <input type="file" accept="image/*" onchange="uploadAvatar(event,'user')" />
+            </div>
+            <div class="avatar-label">我的头像</div>
+            <button class="avatar-reset-btn" onclick="resetAvatar('user')">[ 重置 ]</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="settings-group">
       <div class="settings-px-title">// MEMORY</div>
       <div class="settings-card">
         <label>告诉小机你是谁——每次对话都会带上这段话</label>
         <textarea id="memory-input" placeholder="我叫…，我喜欢…，希望你…"></textarea>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="settings-px-title">// MEMORY BANK（记忆库）</div>
+      <div class="settings-card">
+        <label>从对话中总结的记忆点，新会话可选择性注入</label>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <button class="px-btn" style="padding:6px 12px;font-size:11px;" onclick="syncMemoryBank(true)">☁ 上传</button>
+          <button class="px-btn" style="padding:6px 12px;font-size:11px;" onclick="syncMemoryBank(false)">☁ 拉取</button>
+          <button class="px-btn" style="padding:6px 12px;font-size:11px;" onclick="clearMemoryBank()">清空</button>
+        </div>
+        <div class="memory-bank-list" id="memory-bank-list"></div>
       </div>
     </div>
     <div class="settings-group">
@@ -901,7 +1080,19 @@ CREATE TABLE mood_entries (
 );
 
 alter table mood_entries enable row level security;
-create policy "allow all" on mood_entries for all using (true) with check (true);</pre>
+create policy "allow all" on mood_entries for all using (true) with check (true);
+
+-- 记忆库表
+CREATE TABLE memory_bank (
+  id bigint generated always as identity primary key,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  sync_code text unique not null,
+  memories jsonb not null
+);
+
+alter table memory_bank enable row level security;
+create policy "allow all" on memory_bank for all using (true) with check (true);</pre>
     </div>
   </div>
 </div>
@@ -943,6 +1134,19 @@ create policy "allow all" on mood_entries for all using (true) with check (true)
   </div>
 </div>
 
+<!-- ══ MEMORY INJECTION MODAL ══ -->
+<div class="memory-inject-overlay" id="memory-inject-modal" onclick="closeMemoryInject(event)">
+  <div class="memory-inject-box">
+    <div class="memory-inject-title">// INJECT MEMORY</div>
+    <div class="memory-inject-sub">选择要注入新对话的记忆（不选也有基础记忆）</div>
+    <div class="memory-inject-list" id="memory-inject-list"></div>
+    <div class="memory-inject-actions">
+      <button class="memory-inject-btn secondary" onclick="createSessionNoMemory()">跳过</button>
+      <button class="memory-inject-btn" onclick="createSessionWithMemory()">开始对话</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════
    小机 v2.0 — 前端逻辑
@@ -976,12 +1180,14 @@ setInterval(tickClock, 1000);
 
 function init() {
   loadSettings();
+  loadAvatars();
   checkSetup();
   renderDiaryDate();
   renderHistory();
   loadSessions();
   loadChatHistoryFromSession();
   renderMoodPage();
+  renderMemoryBankList();
   tickClock();
   checkBackend();
   restoreMusicAccount();
@@ -1120,6 +1326,7 @@ function switchPage(name) {
   if (name === 'diary') renderHistory();
   if (name === 'mail') checkGmailStatus();
   if (name === 'mood') renderMoodPage();
+  if (name === 'settings') renderMemoryBankList();
 }
 
 /* ═══════════════════════════════════════
@@ -1162,12 +1369,27 @@ async function sendMessage(imageData) {
     const weekday = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'][now.getDay()];
     const yesterday = new Date(now - 86400000).toLocaleDateString('zh-CN');
     const tomorrow = new Date(now + 86400000).toLocaleDateString('zh-CN');
-    let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。回答“今天/昨天/明天/刚才/多久后”等问题必须据此推算，并同时说出明确日期与时间，不能凭空猜测。`;
+    let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。回答"今天/昨天/明天/刚才/多久后"等问题必须据此推算，并同时说出明确日期与时间，不能凭空猜测。`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
+    // 注入记忆库内容
+    const session = getCurrentSession();
+    if (session && session.injectedMemories) {
+      sys += '\n\n以下是之前对话总结的记忆，帮助你了解用户：\n' + session.injectedMemories;
+    } else {
+      // 基础记忆：自动注入最近3条记忆
+      const recentMemories = getRecentMemories(3);
+      if (recentMemories.length) {
+        sys += '\n\n以下是之前对话总结的记忆，帮助你了解用户：\n' + recentMemories.map(m => m.summary).join('\n');
+      }
+    }
     const moodCtx = getMoodContext();
     if (moodCtx) sys += '\n' + moodCtx;
     const playing = JSON.parse(localStorage.getItem('current_song') || 'null');
     if (playing) sys += `\n\n用户当前正在听：${playing.name} - ${playing.artist}（网易云歌曲 ID: ${playing.songId}），进度约 ${playing.currentTime || 0} 秒；当前歌词句：${playing.currentLyric || '尚未进入有歌词的段落'}。当用户问正在播放什么、歌词唱到哪里或换歌时，请结合这个状态回答。`;
+
+    // 思考链：检查开关是否激活
+    const thinkingEnabled = document.getElementById('think-toggle')?.classList.contains('active');
+    const thinkingParam = thinkingEnabled ? { enabled: true, budget: 5000 } : null;
 
     const resp = await fetch(API_BASE + '/api/chat', {
       method: 'POST',
@@ -1175,6 +1397,7 @@ async function sendMessage(imageData) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6', max_tokens: 1000, system: sys,
         messages: chatHistory.map(m => ({role: m.role, content: m.content})),
+        thinking: thinkingParam,
         tools: [
           { name: 'search_music', description: '搜索网易云音乐。用户要点歌、找歌或问某首歌时先调用。', input_schema: { type: 'object', properties: { query: { type: 'string', description: '歌曲名、歌手或关键词' } }, required: ['query'] } },
           { name: 'play_music', description: '在用户当前设备的网页播放器播放一首已确定 ID 的网易云歌曲。仅在搜索到歌曲并已决定播放时调用。', input_schema: { type: 'object', properties: { songId: { type: 'integer' }, name: { type: 'string' }, artist: { type: 'string' } }, required: ['songId', 'name', 'artist'] } },
@@ -1191,9 +1414,11 @@ async function sendMessage(imageData) {
       if (action.type === 'edit_diary') applyDiaryAction(action);
       if (action.type === 'compose_email') applyEmailAction(action);
     }
+    // 提取思考链
+    const thinkingText = (data.content || []).filter(b => b.type === 'thinking').map(b => b.thinking).join('\n');
     const reply = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || '已帮你安排好了。';
     const replyTs = timestamp();
-    chatHistory.push({ role: 'assistant', content: reply, time: replyTs });
+    chatHistory.push({ role: 'assistant', content: reply, time: replyTs, thinking: thinkingText || undefined });
     renderChat();
     saveChatHistory();
   } catch(e) {
@@ -1325,6 +1550,9 @@ async function handleFile(event) {
     const tomorrow = new Date(now + 86400000).toLocaleDateString('zh-CN');
     let sys = `你是小机，一个温柔、有情感的AI伴侣。当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。涉及相对时间必须据此推算并给出具体日期时间。`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
+    // 注入记忆库基础记忆
+    const recentMems = getRecentMemories(3);
+    if (recentMems.length) sys += '\n\n以下是之前对话总结的记忆：\n' + recentMems.map(m => m.summary).join('\n');
     const moodCtx2 = getMoodContext();
     if (moodCtx2) sys += '\n' + moodCtx2;
 
@@ -1333,7 +1561,8 @@ async function handleFile(event) {
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys,
-        messages: chatHistory.map(m => ({ role: m.role, content: m.content }))
+        messages: chatHistory.map(m => ({ role: m.role, content: m.content })),
+        thinking: document.getElementById('think-toggle')?.classList.contains('active') ? { enabled: true, budget: 5000 } : null
       })
     });
 
@@ -1344,9 +1573,10 @@ async function handleFile(event) {
       throw new Error(err.error?.message || '请求失败');
     }
     const aiData = await aiResp.json();
-    const reply = aiData.content[0].text;
+    const thinkingText2 = (aiData.content || []).filter(b => b.type === 'thinking').map(b => b.thinking).join('\n');
+    const reply = (aiData.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || aiData.content?.[0]?.text || '';
     const replyTs = timestamp();
-    chatHistory.push({ role: 'assistant', content: reply, time: replyTs });
+    chatHistory.push({ role: 'assistant', content: reply, time: replyTs, thinking: thinkingText2 || undefined });
     renderChat();
     saveChatHistory();
   } catch(e) {
@@ -1358,19 +1588,26 @@ async function handleFile(event) {
   }
 }
 
-function appendBubble(role, text, time, imgPreview, messageIndex = null) {
+function getAvatar(role) {
+  const stored = localStorage.getItem(role === 'assistant' ? 'ai_avatar' : 'user_avatar');
+  if (stored) return `<img src="${escAttr(stored)}" alt="avatar"/>`;
+  return role === 'assistant' ? '🌙' : '★';
+}
+
+function appendBubble(role, text, time, imgPreview, thinking, messageIndex = null) {
   const wrap = document.getElementById('messages-wrap');
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  const avatar = role === 'assistant' ? '🌙' : '★';
+  const avatarHtml = getAvatar(role);
   let bubbleHtml = '';
   if (imgPreview) {
     bubbleHtml = `<img src="${escAttr(imgPreview)}" alt="img"/>`;
   }
   bubbleHtml += escHtml(text);
+  const thinkingHtml = thinking ? `<span class="thinking-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed')">💭 思考过程（点击折叠/展开）</span><div class="thinking-bubble">${escHtml(thinking)}</div>` : '';
   const timeHtml = time ? `<div class="msg-time">${escHtml(time)}</div>` : '';
   const actions = role === 'user' && messageIndex !== null ? `<div class="msg-actions"><button onclick="editMessage(${messageIndex})">编辑</button><button onclick="withdrawMessage(${messageIndex})">撤回</button></div>` : '';
-  div.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-col"><div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
+  div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col">${thinkingHtml}<div class="msg-bubble">${bubbleHtml}</div>${timeHtml}${actions}</div>`;
   wrap.appendChild(div);
   wrap.scrollTop = wrap.scrollHeight;
 }
@@ -1379,7 +1616,7 @@ function renderChat() {
   const wrap = document.getElementById('messages-wrap');
   wrap.innerHTML = '';
   if (!chatHistory.length) { wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>'; return; }
-  chatHistory.forEach((m, index) => appendBubble(m.role, typeof m.content === 'string' ? m.content : '[图片或附件]', m.time, m.preview, index));
+  chatHistory.forEach((m, index) => appendBubble(m.role, typeof m.content === 'string' ? m.content : '[图片或附件]', m.time, m.preview, m.thinking, index));
 }
 function withdrawMessage(index) {
   if (chatHistory[index]?.role !== 'user') return;
@@ -1406,7 +1643,8 @@ function appendTyping(id) {
   const wrap = document.getElementById('messages-wrap');
   const div = document.createElement('div');
   div.className = 'msg assistant'; div.id = id;
-  div.innerHTML = `<div class="msg-avatar">🌙</div><div class="msg-col"><div class="msg-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>`;
+  const avatarHtml = getAvatar('assistant');
+  div.innerHTML = `<div class="msg-avatar">${avatarHtml}</div><div class="msg-col"><div class="msg-bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>`;
   wrap.appendChild(div);
   wrap.scrollTop = wrap.scrollHeight;
 }
@@ -1932,8 +2170,57 @@ function formatSessionTime(iso) {
 }
 
 function createSession() {
+  // 打开记忆注入选择框
+  const memories = getMemoryBank();
+  if (memories.length) {
+    openMemoryInjectModal();
+  } else {
+    // 没有记忆，直接创建
+    doCreateSession(null);
+  }
+}
+
+function openMemoryInjectModal() {
+  const memories = getMemoryBank();
+  const list = document.getElementById('memory-inject-list');
+  list.innerHTML = memories.map((m, i) => `
+    <div class="memory-inject-item" onclick="this.querySelector('input').click()">
+      <input type="checkbox" value="${i}" />
+      <div class="memory-inject-item-content">
+        <div class="memory-inject-item-title">${escHtml(m.title || '记忆 ' + (i+1))}</div>
+        <div class="memory-inject-item-text">${escHtml(m.summary)}</div>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('memory-inject-modal').classList.add('open');
+}
+
+function closeMemoryInject(event) {
+  if (!event || event.target === document.getElementById('memory-inject-modal')) {
+    document.getElementById('memory-inject-modal').classList.remove('open');
+  }
+}
+
+function createSessionWithMemory() {
+  const selected = [];
+  document.querySelectorAll('#memory-inject-list input:checked').forEach(cb => {
+    const memories = getMemoryBank();
+    const idx = parseInt(cb.value);
+    if (memories[idx]) selected.push(memories[idx]);
+  });
+  const injectedText = selected.length ? selected.map(m => m.summary).join('\n') : null;
+  document.getElementById('memory-inject-modal').classList.remove('open');
+  doCreateSession(injectedText);
+}
+
+function createSessionNoMemory() {
+  document.getElementById('memory-inject-modal').classList.remove('open');
+  doCreateSession(null);
+}
+
+function doCreateSession(injectedMemories) {
   const sid = 'session-' + Date.now();
-  const session = { id: sid, title: '新对话', messages: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const session = { id: sid, title: '新对话', messages: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString(), injectedMemories };
   chatSessions.unshift(session);
   currentSessionId = sid;
   localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
@@ -1942,7 +2229,7 @@ function createSession() {
   renderChat();
   renderSessionsList();
   closeSessions();
-  showToast('新对话已创建');
+  showToast(injectedMemories ? '新对话已创建（已注入记忆）' : '新对话已创建');
 }
 
 function switchSession(sid) {
@@ -2231,6 +2518,202 @@ function getMoodContext() {
     ctx += `\n近一周心情记录：${recentStr}`;
   }
   return ctx;
+}
+
+/* ═══════════════════════════════════════
+   思考链切换
+   ═══════════════════════════════════════ */
+function toggleThinking() {
+  const btn = document.getElementById('think-toggle');
+  btn.classList.toggle('active');
+  showToast(btn.classList.contains('active') ? '思考链已开启' : '思考链已关闭');
+}
+
+/* ═══════════════════════════════════════
+   自定义头像
+   ═══════════════════════════════════════ */
+function uploadAvatar(event, type) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    // 压缩头像
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const size = 64;
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // 裁剪为正方形
+      const minDim = Math.min(img.width, img.height);
+      const sx = (img.width - minDim) / 2;
+      const sy = (img.height - minDim) / 2;
+      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      localStorage.setItem(type === 'ai' ? 'ai_avatar' : 'user_avatar', dataUrl);
+      loadAvatars();
+      renderChat();
+      showToast(type === 'ai' ? 'AI 头像已更新' : '我的头像已更新');
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function resetAvatar(type) {
+  localStorage.removeItem(type === 'ai' ? 'ai_avatar' : 'user_avatar');
+  loadAvatars();
+  renderChat();
+  showToast('已重置为默认');
+}
+
+function loadAvatars() {
+  // 更新设置页预览
+  const aiBox = document.getElementById('ai-avatar-box');
+  const userBox = document.getElementById('user-avatar-box');
+  const aiAvatar = localStorage.getItem('ai_avatar');
+  const userAvatar = localStorage.getItem('user_avatar');
+  if (aiBox) aiBox.innerHTML = aiAvatar ? `<img src="${escAttr(aiAvatar)}" alt="ai"/>` + aiBox.querySelector('input')?.outerHTML : '🌙' + (aiBox.querySelector('input')?.outerHTML || '');
+  if (userBox) userBox.innerHTML = userAvatar ? `<img src="${escAttr(userAvatar)}" alt="user"/>` + userBox.querySelector('input')?.outerHTML : '★' + (userBox.querySelector('input')?.outerHTML || '');
+  // 更新聊天头部头像
+  const headerAvatar = document.querySelector('.chat-header .px-avatar');
+  if (headerAvatar) {
+    if (aiAvatar) {
+      headerAvatar.innerHTML = `<img src="${escAttr(aiAvatar)}" alt="ai" style="width:100%;height:100%;object-fit:cover;image-rendering:pixelated;"/>`;
+    } else {
+      headerAvatar.textContent = '🌙';
+    }
+  }
+}
+
+/* ═══════════════════════════════════════
+   记忆库
+   ═══════════════════════════════════════ */
+function getMemoryBank() {
+  try { return JSON.parse(localStorage.getItem('memory_bank') || '[]'); }
+  catch { return []; }
+}
+
+function saveMemoryBank(memories) {
+  localStorage.setItem('memory_bank', JSON.stringify(memories));
+}
+
+function getRecentMemories(count) {
+  const memories = getMemoryBank();
+  return memories.slice(-count).reverse();
+}
+
+async function summarizeToMemory() {
+  const apiKey = localStorage.getItem('api_key');
+  if (!apiKey) { showToast('未设置 API Key'); switchPage('settings'); return; }
+  if (!chatHistory.length) { showToast('当前对话为空'); return; }
+  showToast('正在总结记忆…');
+  const session = getCurrentSession();
+  const sessionTitle = session?.title || '未命名对话';
+  const mem = localStorage.getItem('memory');
+  try {
+    const resp = await fetch(API_BASE + '/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ messages: chatHistory, sessionTitle, memory: mem })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error?.message || '总结失败');
+    const memories = getMemoryBank();
+    memories.push({
+      id: 'mem-' + Date.now(),
+      title: sessionTitle,
+      summary: data.summary,
+      createdAt: new Date().toISOString()
+    });
+    // 保留最多 50 条
+    if (memories.length > 50) memories.shift();
+    saveMemoryBank(memories);
+    // 云同步
+    syncMemoryBank(true);
+    renderMemoryBankList();
+    showToast('记忆已保存到记忆库');
+  } catch(e) {
+    showToast('错误: ' + e.message);
+  }
+}
+
+function renderMemoryBankList() {
+  const list = document.getElementById('memory-bank-list');
+  if (!list) return;
+  const memories = getMemoryBank();
+  if (!memories.length) {
+    list.innerHTML = '<div class="memory-empty-state">还没有记忆<br>点击聊天页面的 🧠 总结对话</div>';
+    return;
+  }
+  list.innerHTML = memories.slice().reverse().map(m => {
+    const time = new Date(m.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `<div class="memory-item">
+      <div class="memory-item-title">${escHtml(m.title)} · ${time}</div>
+      <div class="memory-item-text">${escHtml(m.summary)}</div>
+      <div class="memory-item-meta">
+        <span class="memory-item-time"></span>
+        <div class="memory-item-actions">
+          <button onclick="injectMemoryToCurrent('${m.id}')">注入当前</button>
+          <button onclick="deleteMemory('${m.id}')">删除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function deleteMemory(id) {
+  const memories = getMemoryBank().filter(m => m.id !== id);
+  saveMemoryBank(memories);
+  syncMemoryBank(true);
+  renderMemoryBankList();
+  showToast('已删除');
+}
+
+function clearMemoryBank() {
+  if (!confirm('确定清空记忆库？此操作不可恢复')) return;
+  localStorage.removeItem('memory_bank');
+  syncMemoryBank(true);
+  renderMemoryBankList();
+  showToast('记忆库已清空');
+}
+
+function injectMemoryToCurrent(id) {
+  const memory = getMemoryBank().find(m => m.id === id);
+  if (!memory) return;
+  const session = getCurrentSession();
+  if (session) {
+    session.injectedMemories = memory.summary;
+    localStorage.setItem('chat_sessions', JSON.stringify(chatSessions));
+    showToast('记忆已注入当前对话');
+  }
+}
+
+function syncMemoryBank(upload) {
+  const { syncCode, sbUrl, sbKey, ready } = getSyncConfig();
+  if (!ready) return;
+  const memories = getMemoryBank();
+  if (upload) {
+    fetch(API_BASE + '/api/memory/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ syncCode, memories, sbUrl, sbKey })
+    }).then(r => r.json()).then(data => {
+      if (data.ok) console.log('记忆库已同步');
+    }).catch(() => {});
+  } else {
+    fetch(API_BASE + '/api/memory/sync?code=' + encodeURIComponent(syncCode) + '&sbUrl=' + encodeURIComponent(sbUrl) + '&sbKey=' + encodeURIComponent(sbKey))
+      .then(r => r.json()).then(data => {
+        if (data.ok && data.memories) {
+          saveMemoryBank(data.memories);
+          renderMemoryBankList();
+          showToast(`已拉取 ${data.memories.length} 条记忆`);
+        } else {
+          showToast(data.message || '拉取失败');
+        }
+      }).catch(e => showToast('拉取失败: ' + e.message));
+  }
 }
 
 init();
