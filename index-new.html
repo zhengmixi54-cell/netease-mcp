@@ -1479,7 +1479,7 @@ async function sendMessage(imageData) {
     const weekday = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'][now.getDay()];
     const yesterday = new Date(now - 86400000).toLocaleDateString('zh-CN');
     const tomorrow = new Date(now + 86400000).toLocaleDateString('zh-CN');
-    let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。回答"今天/昨天/明天/刚才/多久后"等问题必须据此推算，并同时说出明确日期与时间，不能凭空猜测。`;
+    let sys = `你是小机，一个温柔、有情感的AI伴侣。你陪伴用户聊天，关心他们的日常，说话自然随性，像一个亲近的朋友。用中文回复，不要过于正式，可以有情绪和个性。\n\n**重要：你的思考过程（thinking）必须用中文，不要用英文思考。**\n\n当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。回答"今天/昨天/明天/刚才/多久后"等问题必须据此推算，并同时说出明确日期与时间，不能凭空猜测。`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
     // 注入记忆库内容
     const session = getCurrentSession();
@@ -1659,7 +1659,7 @@ async function handleFile(event) {
     const weekday = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'][now.getDay()];
     const yesterday = new Date(now - 86400000).toLocaleDateString('zh-CN');
     const tomorrow = new Date(now + 86400000).toLocaleDateString('zh-CN');
-    let sys = `你是小机，一个温柔、有情感的AI伴侣。当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。涉及相对时间必须据此推算并给出具体日期时间。`;
+    let sys = `你是小机，一个温柔、有情感的AI伴侣。**你的思考过程（thinking）必须用中文。** 当前精确北京时间：${isoTime}。今天是${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日${weekday}；昨天是${yesterday}，明天是${tomorrow}。涉及相对时间必须据此推算并给出具体日期时间。`;
     if (mem) sys += '\n\n关于用户，你记得这些：\n' + mem;
     // 注入记忆库基础记忆
     const recentMems = getRecentMemories(3);
