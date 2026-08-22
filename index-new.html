@@ -1268,6 +1268,9 @@ function init() {
   loadSettings();
   loadAvatars();
   checkSetup();
+  // 思考链默认开启（streaming 模式下可以从 worker 获取 thinking blocks）
+  const thinkBtn = document.getElementById('think-toggle');
+  if (thinkBtn && !thinkBtn.classList.contains('active')) thinkBtn.classList.add('active');
   renderDiaryDate();
   renderHistory();
   loadSessions();

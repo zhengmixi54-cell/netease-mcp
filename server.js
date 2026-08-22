@@ -200,11 +200,79 @@ app.post('/api/chat', async (req, res) => {
     // Complete a small server-side tool loop: the AI can search NetEase songs,
     // select one, and return an action for the browser to play on this device.
     for (let round = 0; round < 3; round++) {
+      // thinking 模式下用 streaming 请求（worker 可能只透传 SSE 流中的 thinking）
+      const streamFlag = thinkingConfig.thinking ? { stream: true } : {};
       const resp = await fetch(`${AI_PROXY}/v1/messages`, {
         method: 'POST', headers,
-        body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: finalMaxTokens, system, messages: conversation, tools, ...thinkingConfig })
+        body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: finalMaxTokens, system, messages: conversation, tools, ...thinkingConfig, ...streamFlag })
       });
-      const data = await resp.json();
+
+      // thinking 模式下用 streaming 提取 thinking blocks（worker 可能不透传非 streaming 的 thinking）
+      let data;
+      if (thinkingConfig.thinking) {
+        // 检查是不是 SSE 流
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('text/event-stream') || resp.headers.get('transfer-encoding') === 'chunked') {
+          // 解析 SSE 事件流，聚合 thinking + text + tool_use blocks
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const contentBlocks = [];
+          let currentBlock = null;
+          let stopReason = null;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const eventData = line.slice(6).trim();
+              if (!eventData || eventData === '[DONE]') continue;
+              try {
+                const ev = JSON.parse(eventData);
+                if (ev.type === 'content_block_start') {
+                  currentBlock = { ...ev.content_block };
+                  if (currentBlock.type === 'thinking') currentBlock.thinking = '';
+                  else if (currentBlock.type === 'text') currentBlock.text = '';
+                  else if (currentBlock.type === 'tool_use') currentBlock._partial = '';
+                } else if (ev.type === 'content_block_delta') {
+                  if (ev.delta?.type === 'thinking_delta' && currentBlock) {
+                    currentBlock.thinking += ev.delta.thinking;
+                  } else if (ev.delta?.type === 'text_delta' && currentBlock) {
+                    currentBlock.text += ev.delta.text;
+                  } else if (ev.delta?.type === 'input_json_delta' && currentBlock) {
+                    currentBlock._partial += ev.delta.partial_json;
+                  }
+                } else if (ev.type === 'content_block_stop') {
+                  if (currentBlock) {
+                    if (currentBlock._partial !== undefined) {
+                      try { currentBlock.input = JSON.parse(currentBlock._partial); } catch {}
+                      delete currentBlock._partial;
+                    }
+                    contentBlocks.push(currentBlock);
+                    currentBlock = null;
+                  }
+                } else if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
+                  stopReason = ev.delta.stop_reason;
+                }
+              } catch (e) { /* 忽略解析错误 */ }
+            }
+          }
+
+          data = { content: contentBlocks, stop_reason: stopReason, role: 'assistant', type: 'message' };
+        } else {
+          // worker 不返回 SSE 流（可能是聚合模式），正常解析 JSON
+          data = await resp.json();
+        }
+      } else {
+        // 非 thinking 模式，正常解析 JSON
+        data = await resp.json();
+      }
+
       if (!resp.ok) return res.status(resp.status).json(data);
       const toolUses = (data.content || []).filter(block => block.type === 'tool_use');
       if (!toolUses.length) return res.json({ ...data, clientActions });
