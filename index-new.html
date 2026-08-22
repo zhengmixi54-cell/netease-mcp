@@ -1697,9 +1697,10 @@ function appendBubble(role, text, time, imgPreview, thinking, messageIndex = nul
 function renderChat() {
   const wrap = document.getElementById('messages-wrap');
   wrap.innerHTML = '';
-  if (!chatHistory.length) { wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>'; return; }
+  if (!chatHistory.length) { wrap.innerHTML = '<div class="chat-empty" id="chat-empty"><div class="px-logo">* XIAOJI *<br>v2.0.0</div><p>今天过得怎么样？<br>随便说点什么吧。</p></div>'; recalcChatLayout(); return; }
   chatHistory.forEach((m, index) => appendBubble(m.role, typeof m.content === 'string' ? m.content : '[图片或附件]', m.time, m.preview, m.thinking, index));
   // 渲染后确保滚动到底部
+  recalcChatLayout();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       wrap.scrollTop = wrap.scrollHeight;
